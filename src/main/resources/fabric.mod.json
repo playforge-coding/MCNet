@@ -1,0 +1,36 @@
+{
+	"schemaVersion": 1,
+	"id": "mcnet",
+	"version": "${version}",
+	"name": "MCNet",
+	"description": "",
+	"authors": [
+		"playforge-coding"
+	],
+	"contact": {
+		"sources": "https://github.com/playforge-coding/MCNet"
+	},
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			{
+				"adapter": "kotlin",
+				"value": "dev.mcnet.MCNet"
+			}
+		],
+		"client": [
+			{
+				"adapter": "kotlin",
+				"value": "dev.mcnet.client.MCNetClient"
+			}
+		]
+	},
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=25",
+		"fabric-api": "*",
+		"fabric-language-kotlin": ">=1.13.13"
+	}
+}

@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gradle-wrapper.jar is an executable binary committed to the repo, which
+      # makes it a supply-chain target: a modified wrapper runs arbitrary code
+      # on every build. This checks it against the checksums Gradle publishes
+      # for official releases, so a tampered jar fails the build rather than
+      # silently executing.
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The tests bind real iroh endpoints on loopback, so they exercise the
+      # native library as well as the tunnel logic.
+      - name: Build and test
+        run: ./gradlew build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcnet
+          path: build/libs/*.jar

@@ -1,0 +1,81 @@
+# gradle
+
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+#
+# Ignore per-machine state but leave room to share project-level settings.
+# `.idea/*` rather than `.idea/` matters: git will not descend into an excluded
+# directory, so a trailing-slash ignore makes the negations below impossible.
+#
+# runConfigurations is excluded deliberately, not by accident. Loom regenerates
+# the Minecraft Client/Server configs on Gradle sync, and it bakes absolute
+# paths into them — not only $HOME/Developer/... but every dependency jar in
+# ~/.gradle/caches, content hashes and all. They are unusable on another
+# machine and churn on every version bump.
+
+.idea/*
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
+!.idea/copyright/
+!.idea/scopes/
+!.idea/encodings.xml
+
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# kotlin
+# The Kotlin 2.x Gradle plugin keeps build-session state here.
+
+.kotlin/
+
+# fabric
+
+run/
+remappedSrc/
+.fabric/
+
+# gradle daemon / loom logs written to the project root
+
+logs/
+
+# java
+
+hs_err_*.log
+replay_*.log
+*.hprof
+*.jfr
+
+# mcnet: locally built iroh bindings
+#
+# dht/apply.sh patches a checkout of iroh-ffi, and the jar it produces gets
+# passed to the build with -Pmcnet.irohJar. Neither belongs in the repo — the
+# patch itself (dht/*.rs, dht/apply.sh) does, and is not matched here.
+
+dht/iroh-ffi/
+iroh-*.jar
+/libs/
+
+# mcnet: decompiled game sources, kept locally for API reference only
+
+decompiled/

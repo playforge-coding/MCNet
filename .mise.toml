@@ -1,0 +1,4 @@
+# MCNet targets Minecraft 26.2, which requires JDK 25.
+# The iroh-ffi Kotlin build under dht/ needs JDK 21 instead — see dht/README.md.
+[tools]
+java = "temurin-25"
