@@ -13,6 +13,11 @@ Written in Kotlin end to end, using Fabric's `kotlin` language adapter.
 | Fabric API | 0.163.0 |
 | iroh | `computer.iroh:iroh:1.1.0` |
 | fabric-language-kotlin | 1.14.2 (Kotlin 2.4.21) |
+| opus4j (voice addon only) | `de.maxhenkel.opus4j:opus4j:2.1.3` |
+
+The repository builds two jars: `mcnet`, the networking mod, and `mcnet-voice`,
+an optional [voice chat addon](#voice-chat-the-optional-addon) that depends on
+it.
 
 ## How it works
 
@@ -96,16 +101,117 @@ idempotent `apply.sh` that applies it, and the build procedure. Upstream's
 release workflow already cross-builds every native, so a fork inherits the whole
 pipeline.
 
+## Voice chat, the optional addon
+
+`mcnet-voice` is a second mod in [`voice/`](voice/). It carries voice over the
+same iroh endpoint as the game, so it inherits everything the core already
+solved: no port forwarding, no voice server to rent, hole punching and relay
+fallback included. Install it next to `mcnet` on the host and on every player
+who wants to talk. Players without it keep playing; they just cannot hear or
+be heard.
+
+There is no proximity yet. Everyone in the world hears everyone else.
+
+### Using it
+
+Nothing to configure. When the host is hosting over MCNet and a player joins
+with the addon installed, the server offers voice and the client connects.
+That includes the host's own player on a singleplayer world, and it includes
+players who joined over plain LAN rather than through a join code.
+
+| Key | Default | Does |
+|---|---|---|
+| Push to talk | V | Opens the microphone while held |
+| Mute microphone | M | Toggles the mic off entirely |
+| Voice settings | unbound | Opens the settings screen |
+
+The settings screen is also reachable from the *Voice* button on the pause
+menu. It offers push-to-talk or voice activation with a live level meter for
+tuning the threshold, microphone and output device selection, microphone gain,
+voice volume, a HUD toggle, and a per-player list with mute and volume. Those
+per-player settings are keyed by player UUID and survive across sessions.
+Everything lives in `config/mcnet-voice.json`.
+
+The HUD sits in the bottom-right corner: the names of whoever is speaking,
+plus your own state when it matters (talking, muted, or disconnected).
+
+### How it works
+
+The design is a star. Every client holds one QUIC connection to the host over
+a dedicated `mcnet-voice/1` ALPN, and the host relays each frame to everyone
+else. A mesh would avoid the hop through the host, but the star is what makes
+proximity a small change later: the server knows every player's position, so
+proximity becomes a filter in the relay loop rather than a redesign.
+
+![Three players each hold one iroh connection to the VoiceServer relay in the host process, and the host's own player attaches to the relay in-process](docs/voice-topology.drawio.svg)
+
+Like the other diagram, this one is a draw.io file with the source embedded,
+so opening `docs/voice-topology.drawio.svg` in draw.io makes it editable.
+
+Audio travels in QUIC **datagrams**, not streams. A voice frame that arrives
+late is worthless, and a reliable stream would hold every later frame hostage
+to a retransmission. Datagrams are still encrypted and authenticated by QUIC;
+they just are not retransmitted. Each one is:
+
+```
+u8 type | u16 speaker | u32 sequence | opus payload
+```
+
+Opus runs at 48 kHz mono in 20 ms frames, about 60 to 80 bytes each, against
+the 1162-byte datagram floor that `DatagramProbeTest` measured. The receiver
+keeps a small jitter buffer per speaker (40 ms before playback starts, 60 ms
+queued) and asks the decoder to conceal single lost frames. Playback goes
+through the OpenAL that Minecraft already ships, on a separate context bound to
+the voice thread with `ALC_EXT_thread_local_context`, so the game's own sound
+engine never notices. Capture uses OpenAL too.
+
+Control traffic, which does need to arrive in order, uses one bidirectional
+stream per connection: the participant roster from the host, and keepalive
+pings so a silent listener is not dropped for idling.
+
+**Identity.** A voice connection is admitted only if the game session has
+vouched for its endpoint id. The server sends an offer containing a ticket and
+a random nonce as a Fabric custom payload; the client signs the nonce with its
+iroh key and replies with its endpoint id; the server verifies the signature
+against that id before binding it to the player. The QUIC handshake has already
+proven the dialer holds the same key. So the join code stays the only
+credential, and nobody can speak under another player's name.
+
+The host's own player cannot dial their own endpoint, so on a singleplayer
+world the host's client attaches to the relay in-process instead. On a
+dedicated server that path is simply never used.
+
+### The addon seam
+
+Voice is built on two small additions to the core that any other addon can use:
+
+| API | What it does |
+|---|---|
+| [`Protocols.register(alpn, handler)`](src/main/kotlin/dev/mcnet/net/Protocols.kt) | Advertises an ALPN on the shared endpoint and routes connections carrying it to the handler. Call it from a mod initializer; a late call still updates the live endpoint. Connections are only accepted while hosting. |
+| [`MCNetEvents`](src/main/kotlin/dev/mcnet/MCNetEvents.kt) | `HOSTING_STARTED`, `HOSTING_STOPPED`, `PEER_CONNECTED`, `PEER_DISCONNECTED`, on the host. All fire off the server thread. |
+| [`MCNetClientEvents`](src/client/kotlin/dev/mcnet/client/MCNetClientEvents.kt) | `JOINED` and `LEFT`, on the client, on the render thread. |
+
+`HostTunnel` also exposes `peers`, the endpoint ids currently tunneled into the
+game, for addons that want to gate on it.
+
 ## Building
 
 ```sh
-./gradlew build          # lint, test and package; jar in build/libs/
-./gradlew test           # end-to-end tunnel tests
+./gradlew build          # lint, test and package both jars
+./gradlew test           # end-to-end tunnel and relay tests
 ./gradlew spotlessApply  # format the code
-./gradlew runClient      # dev client
+./gradlew runClient      # dev client with the core mod only
+./gradlew :voice:runClient  # dev client with the core and the voice addon
 ```
 
+The core jar lands in `build/libs/` and the addon in `voice/build/libs/`.
 Gradle provisions the JDK 25 toolchain automatically.
+
+The voice subproject compiles against the core's source set outputs rather
+than its jar (the jar has iroh nested inside, which the loader would try to
+load twice in dev), and lists the core's source sets in its own `loom.mods`
+block, which is what lets its dev client see MCNet as a mod rather than as
+loose classes.
 
 ### Linting and formatting
 
@@ -126,21 +232,25 @@ checksums Gradle publishes for official releases. The committed jar matches
 Gradle 9.8.1 (SHA-256 `3b8a2577` through `8e98`).
 
 The built jar bundles the iroh bindings and their native library (about 29 MB)
-via Jar-in-Jar, so users install a single file.
+via Jar-in-Jar, so users install a single file. The voice jar nests opus4j the
+same way (about 1.5 MB with natives for six platforms) and deliberately does
+not nest iroh or JNA again, since Fabric loads every mod on one classpath and
+the core already provides them.
 
 ### Releasing
 
 Publish a GitHub release tagged `v1.2.3` and
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the mod
-and attaches the jars to it. The tag drives the version: `v1.2.3` is stamped
-into `fabric.mod.json` via `-Pmod_version`, so the release and the mod metadata
-cannot disagree.
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds both
+mods and attaches the jars to it. The tag drives the version: `v1.2.3` is
+stamped into both `fabric.mod.json` files via `-Pmod_version`, so the release
+and the mod metadata cannot disagree. The core and the addon are versioned
+together; the addon declares the core version it was built against.
 
-Before publishing, the workflow checks that the jar is actually usable: the
-iroh bindings and JNA must be nested inside it, and the version must be
-stamped. A Jar-in-Jar failure still produces a jar that builds fine and then
-dies with `NoClassDefFoundError` the first time someone hosts, so it is worth
-catching before it reaches a download button.
+Before publishing, the workflow checks that each jar is actually usable: the
+iroh bindings and JNA must be nested inside the core, opus4j inside the addon,
+and the version must be stamped. A Jar-in-Jar failure still produces a jar
+that builds fine and then dies with `NoClassDefFoundError` the first time
+someone hosts, so it is worth catching before it reaches a download button.
 
 `workflow_dispatch` runs the same build without a release, leaving the jar as a
 workflow artifact.
@@ -169,6 +279,22 @@ a probe.
 `MainlineDhtTest` guards the DHT hookup from both sides: graceful fallback on
 the published bindings, and a real endpoint bind on patched ones
 (`-Pmcnet.irohJar=/path/to/iroh-dht.jar`).
+
+`ProtocolsTest` covers the addon registry: lookup by ALPN content rather than
+array identity, and refusal of reserved or duplicate ALPNs.
+
+The voice addon has its own tests under [`voice/src/test`](voice/src/test):
+
+- `VoiceProtocolTest` pins the datagram and control framing byte for byte.
+- `OpusTest` proves the Opus native loads on the build machine and that a
+  frame survives the codec, including the concealment path.
+- `VoiceRelayTest` runs the relay against real iroh endpoints: roster
+  handshake, fan-out with the sender's id stamped in, refusal of an endpoint
+  no game session vouched for, and the in-process path the host's own player
+  uses.
+
+Microphone capture and OpenAL playback are not unit tested. They need audio
+hardware, so that layer is kept thin.
 
 ## Known limitations
 

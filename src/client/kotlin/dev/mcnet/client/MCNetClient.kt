@@ -34,7 +34,9 @@ object MCNetClient : ClientModInitializer {
     }
 
     fun closeTunnel() {
-        activeTunnel?.stop()
+        val tunnel = activeTunnel ?: return
+        tunnel.stop()
         activeTunnel = null
+        MCNetClientEvents.LEFT.invoker().onLeft()
     }
 }

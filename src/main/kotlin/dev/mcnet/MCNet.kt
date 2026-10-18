@@ -82,7 +82,13 @@ object MCNet : ModInitializer {
 
         IrohRuntime.scope.launch {
             val codes = currentJoinCodes()
-            if (codes.isFailure) stopHosting()
+            if (codes.isFailure) {
+                stopHosting()
+            } else {
+                // Announced once the endpoint is online, so a listener that
+                // immediately asks for a ticket gets a complete one.
+                MCNetEvents.HOSTING_STARTED.invoker().onHostingStarted(tunnel)
+            }
             onReady(codes)
         }
     }
@@ -97,8 +103,10 @@ object MCNet : ModInitializer {
         }
 
     fun stopHosting() {
-        host?.stop()
+        val tunnel = host ?: return
+        tunnel.stop()
         host = null
+        MCNetEvents.HOSTING_STOPPED.invoker().onHostingStopped()
     }
 
     /** Called on client shutdown and dedicated-server stop. */

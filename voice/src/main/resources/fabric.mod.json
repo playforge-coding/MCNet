@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "mcnet-voice",
+	"version": "${version}",
+	"name": "MCNet Voice",
+	"description": "Voice chat for MCNet worlds, carried over the same peer-to-peer connection as the game.",
+	"authors": [
+		"playforge-coding"
+	],
+	"contact": {
+		"sources": "https://github.com/playforge-coding/MCNet"
+	},
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			{
+				"adapter": "kotlin",
+				"value": "dev.mcnet.voice.MCNetVoice"
+			}
+		],
+		"client": [
+			{
+				"adapter": "kotlin",
+				"value": "dev.mcnet.voice.client.MCNetVoiceClient"
+			}
+		]
+	},
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=25",
+		"fabric-api": "*",
+		"fabric-language-kotlin": ">=1.14.2",
+		"mcnet": ">=1.2.0"
+	}
+}

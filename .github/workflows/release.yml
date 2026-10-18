@@ -62,7 +62,7 @@ jobs:
       # is what makes MCNet a single-file install; if it silently did not
       # happen, the mod loads and then dies with NoClassDefFoundError the first
       # time someone hosts. Cheaper to catch here than in a bug report.
-      - name: Verify the jar is complete
+      - name: Verify the jars are complete
         env:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
@@ -79,6 +79,22 @@ jobs:
 
           echo "$JAR looks complete ($(du -h "$JAR" | cut -f1))"
 
+          # The voice addon nests Opus the same way, and must not nest iroh
+          # again: the core provides it, and a second copy would double the
+          # download for nothing.
+          VOICE="voice/build/libs/mcnet-voice-${VERSION}.jar"
+          test -f "$VOICE" || { echo "::error::$VOICE was not produced"; exit 1; }
+
+          unzip -l "$VOICE" | grep -q 'META-INF/jars/opus4j-' \
+            || { echo "::error::opus4j is missing from the voice jar"; exit 1; }
+          if unzip -l "$VOICE" | grep -q 'META-INF/jars/iroh-'; then
+            echo "::error::the voice jar must not bundle iroh; the core already does"; exit 1
+          fi
+          unzip -p "$VOICE" fabric.mod.json | grep -q "\"version\":\"${VERSION}\"" \
+            || { echo "::error::the voice fabric.mod.json was not stamped with ${VERSION}"; exit 1; }
+
+          echo "$VOICE looks complete ($(du -h "$VOICE" | cut -f1))"
+
       - name: Attach jars to the release
         if: github.event_name == 'release'
         env:
@@ -92,9 +108,13 @@ jobs:
           gh release upload "$TAG" \
             "build/libs/mcnet-${VERSION}.jar" \
             "build/libs/mcnet-${VERSION}-sources.jar" \
+            "voice/build/libs/mcnet-voice-${VERSION}.jar" \
+            "voice/build/libs/mcnet-voice-${VERSION}-sources.jar" \
             --clobber
 
       - uses: actions/upload-artifact@v7
         with:
           name: mcnet-${{ steps.v.outputs.version }}
-          path: build/libs/*.jar
+          path: |
+            build/libs/*.jar
+            voice/build/libs/*.jar

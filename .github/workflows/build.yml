@@ -34,4 +34,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: mcnet
-          path: build/libs/*.jar
+          path: |
+            build/libs/*.jar
+            voice/build/libs/*.jar

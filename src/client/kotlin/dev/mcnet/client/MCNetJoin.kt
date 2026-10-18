@@ -47,6 +47,7 @@ object MCNetJoin {
                     // Recorded once the tunnel is up: the host resolved and
                     // accepted us, which is what makes the entry worth keeping.
                     PeerStore.remember(id, displayName)
+                    MCNetClientEvents.JOINED.invoker().onJoined(addr)
                     handOff(parent, shortId, local)
                 }
             } catch (e: Exception) {

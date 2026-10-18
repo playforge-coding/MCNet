@@ -13,3 +13,7 @@ plugins {
 }
 
 rootProject.name = "mcnet"
+
+// The optional voice chat addon. It builds into its own jar and depends on
+// the core mod at runtime, so players who do not want voice never load it.
+include("voice")

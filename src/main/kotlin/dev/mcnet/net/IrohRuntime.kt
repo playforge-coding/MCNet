@@ -55,7 +55,8 @@ object IrohRuntime {
         // that turns a bare endpoint id into an address.
         builder.applyN0()
         builder.secretKey(secret.toBytes())
-        builder.alpns(listOf(MCNET_ALPN, MCNET_PROBE_ALPN))
+        // MCNet's own ALPNs plus whatever addons registered through Protocols.
+        builder.alpns(Protocols.alpns())
 
         if (MCNetConfig.addressLookup == MCNetConfig.AddressLookupMode.DHT) {
             MainlineDht.attach(builder, publish = MCNetConfig.dhtPublish)

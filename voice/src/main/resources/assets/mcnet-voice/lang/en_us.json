@@ -1,0 +1,39 @@
+{
+	"key.category.mcnet-voice.main": "MCNet Voice",
+	"key.mcnet-voice.push_to_talk": "Push to talk",
+	"key.mcnet-voice.toggle_mute": "Mute microphone",
+	"key.mcnet-voice.settings": "Voice settings",
+
+	"mcnet-voice.button.settings": "Voice",
+
+	"mcnet-voice.hud.muted": "Mic muted",
+	"mcnet-voice.hud.talking": "Talking",
+	"mcnet-voice.hud.disconnected": "Voice disconnected",
+
+	"mcnet-voice.settings.title": "MCNet Voice",
+	"mcnet-voice.settings.enabled": "Voice chat",
+	"mcnet-voice.settings.activation": "Activation",
+	"mcnet-voice.settings.activation.push_to_talk": "Push to talk",
+	"mcnet-voice.settings.activation.voice": "Voice activation",
+	"mcnet-voice.settings.threshold": "Activation threshold: %s dB",
+	"mcnet-voice.settings.threshold.hint": "Speak normally; the bar should cross the marker while you talk and stay under it while you are quiet.",
+	"mcnet-voice.settings.mic_gain": "Microphone gain: %s%%",
+	"mcnet-voice.settings.volume": "Voice volume: %s%%",
+	"mcnet-voice.settings.microphone": "Microphone: %s",
+	"mcnet-voice.settings.speaker": "Output: %s",
+	"mcnet-voice.settings.device.default": "System default",
+	"mcnet-voice.settings.hud": "Show HUD",
+	"mcnet-voice.settings.players": "Players...",
+	"mcnet-voice.settings.status.idle": "Not in a voice session. Join or host an MCNet world with the addon installed on both sides.",
+	"mcnet-voice.settings.status.live": "Connected with %s other participant(s).",
+	"mcnet-voice.settings.status.connecting": "Connecting to voice...",
+	"mcnet-voice.settings.status.error": "Voice failed: %s",
+
+	"mcnet-voice.players.title": "Voice participants",
+	"mcnet-voice.players.empty": "Nobody else is in the voice session.",
+	"mcnet-voice.players.mute": "Mute",
+	"mcnet-voice.players.unmute": "Unmute",
+	"mcnet-voice.players.volume": "%s%%",
+	"mcnet-voice.players.speaking": "Speaking",
+	"mcnet-voice.players.narrate": "%s, volume %s percent, %s"
+}
