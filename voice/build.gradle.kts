@@ -17,6 +17,8 @@ repositories {
     mavenCentral()
     // opus4j is published by its author rather than to Maven Central.
     maven("https://maven.maxhenkel.de/repository/public") { name = "henkelmax" }
+    // DevAuth is published by its author rather than to Maven Central.
+    maven("https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1") { name = "devauth" }
 }
 
 val coreSourceSets = project(":").extensions.getByType<SourceSetContainer>()
@@ -34,6 +36,17 @@ loom {
         create("mcnet") {
             sourceSet(coreSourceSets["main"])
             sourceSet(coreSourceSets["client"])
+        }
+    }
+
+    runs {
+        named("client") {
+            // Same -Pmcnet.account=<name> sign-in as the core's dev client.
+            val account = providers.gradleProperty("mcnet.account").orNull
+            if (account != null) {
+                property("devauth.enabled", "true")
+                property("devauth.account", account)
+            }
         }
     }
 }
@@ -75,6 +88,10 @@ dependencies {
         implementation(it)
         include(it)
     }
+
+    // Dev client sign-in. Runtime only, so it is never compiled against or
+    // nested into the jar.
+    runtimeOnly("me.djtheredstoner:DevAuth-fabric:${property("devauth_version")}")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")

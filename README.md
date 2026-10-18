@@ -213,6 +213,37 @@ load twice in dev), and lists the core's source sets in its own `loom.mods`
 block, which is what lets its dev client see MCNet as a mod rather than as
 loose classes.
 
+### Signing in to the dev client
+
+The Gradle dev client is its own Minecraft install. It knows nothing about
+the accounts in your launcher and starts as an offline player with a name
+like `Player392` and a throwaway access token. That is fine for a
+singleplayer world, but joining a hosted world fails with "Invalid session":
+the host's integrated server always verifies joiners against Mojang's
+session servers, and the offline player has nothing to verify.
+
+Both dev runs include [DevAuth](https://github.com/DJtheRedstoner/DevAuth),
+a dev-only mod that signs the client in to a real Microsoft account. It is a
+runtime-only dependency, so it never ends up in a built jar. Pass the name of
+a DevAuth account to turn it on:
+
+```sh
+./gradlew :voice:runClient -Pmcnet.account=main
+```
+
+The first run prints a `login.live.com` URL in the Gradle output. Open it in
+a browser, sign in, and the game continues once the browser lands on the
+local redirect. The token is cached in `~/.devauth` (or
+`$XDG_CONFIG_HOME/devauth` on Linux), so later runs sign in silently. The
+generated `~/.devauth/config.toml` defines two accounts, `main` and `alt`,
+and you can add more.
+
+Testing a join needs two different accounts, because the integrated server
+treats a second login with the host's own account as the host reconnecting
+and kicks the first one. Sign one client in as `main` and the other as `alt`,
+or host from your normal launcher and join from a dev client signed in to a
+different account.
+
 ### Linting and formatting
 
 Kotlin sources and the Gradle build scripts are linted and formatted by

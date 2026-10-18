@@ -13,6 +13,8 @@ base {
 
 repositories {
     mavenCentral()
+    // DevAuth is published by its author rather than to Maven Central.
+    maven("https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1") { name = "devauth" }
 }
 
 loom {
@@ -22,6 +24,19 @@ loom {
         create("mcnet") {
             sourceSet(sourceSets["main"])
             sourceSet(sourceSets["client"])
+        }
+    }
+
+    runs {
+        named("client") {
+            // -Pmcnet.account=<name> signs the dev client in through DevAuth
+            // as that account. Without it the client starts as an offline
+            // "PlayerNNN" and cannot join a hosted world. See the README.
+            val account = providers.gradleProperty("mcnet.account").orNull
+            if (account != null) {
+                property("devauth.enabled", "true")
+                property("devauth.account", account)
+            }
         }
     }
 }
@@ -62,6 +77,10 @@ dependencies {
         implementation(it)
         include(it)
     }
+
+    // Dev client sign-in. Runtime only, so it is never compiled against or
+    // nested into the jar.
+    runtimeOnly("me.djtheredstoner:DevAuth-fabric:${property("devauth_version")}")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
