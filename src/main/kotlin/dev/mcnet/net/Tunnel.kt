@@ -58,7 +58,11 @@ private const val DRAIN_TIMEOUT_MS = 15_000L
  * end-of-stream never reached the local server it would sit waiting for more
  * request bytes and neither side would ever finish.
  */
-suspend fun bridge(socket: Socket, stream: BiStream, scope: CoroutineScope) {
+suspend fun bridge(
+    socket: Socket,
+    stream: BiStream,
+    scope: CoroutineScope,
+) {
     // Minecraft sends many small packets; Nagle's algorithm would add latency
     // for no useful batching.
     runCatching { socket.tcpNoDelay = true }
@@ -74,19 +78,20 @@ suspend fun bridge(socket: Socket, stream: BiStream, scope: CoroutineScope) {
     val upstream = scope.launch { socketToStream(input, send) }
 
     // QUIC -> socket. Ends when the peer finishes its half.
-    val downstream = scope.launch {
-        val cleanEof = streamToSocket(recv, output)
-        runCatching {
-            withContext(Dispatchers.IO) {
-                if (socket.isClosed) return@withContext
-                // A clean end-of-stream becomes a TCP half-close, leaving the
-                // local server free to finish writing its reply. Anything else
-                // means the peer is gone, so drop the socket outright — which
-                // also unblocks the read in the other direction.
-                if (cleanEof) socket.shutdownOutput() else socket.close()
+    val downstream =
+        scope.launch {
+            val cleanEof = streamToSocket(recv, output)
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    if (socket.isClosed) return@withContext
+                    // A clean end-of-stream becomes a TCP half-close, leaving the
+                    // local server free to finish writing its reply. Anything else
+                    // means the peer is gone, so drop the socket outright. That
+                    // also unblocks the read in the other direction.
+                    if (cleanEof) socket.shutdownOutput() else socket.close()
+                }
             }
         }
-    }
 
     downstream.join()
     withTimeoutOrNull(DRAIN_TIMEOUT_MS) { upstream.join() }
@@ -97,7 +102,10 @@ suspend fun bridge(socket: Socket, stream: BiStream, scope: CoroutineScope) {
     runCatching { recv.stop(0uL) }
 }
 
-private suspend fun socketToStream(input: InputStream, send: SendStream) {
+private suspend fun socketToStream(
+    input: InputStream,
+    send: SendStream,
+) {
     val buffer = ByteArray(CHUNK_SIZE)
     try {
         while (true) {
@@ -115,7 +123,10 @@ private suspend fun socketToStream(input: InputStream, send: SendStream) {
 }
 
 /** Returns true if the stream ended cleanly, false if it failed mid-flight. */
-private suspend fun streamToSocket(recv: RecvStream, output: OutputStream): Boolean {
+private suspend fun streamToSocket(
+    recv: RecvStream,
+    output: OutputStream,
+): Boolean {
     try {
         while (true) {
             // An empty read is how the bindings surface end-of-stream; this is

@@ -4,11 +4,11 @@ import computer.iroh.Connection
 import computer.iroh.Incoming
 import dev.mcnet.MCNet
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -31,51 +31,53 @@ class HostTunnel(
     private var job: Job? = null
     private val connected = AtomicInteger()
 
-    /** Number of peers currently tunnelled in. */
+    /** Number of peers currently tunneled in. */
     val peerCount: Int get() = connected.get()
 
     val isRunning: Boolean get() = job?.isActive == true
 
     fun start() {
         check(job == null) { "host tunnel already started" }
-        job = scope.launch {
-            val endpoint = IrohRuntime.endpoint()
-            lookup.publish(endpoint)
-            MCNet.logger.info("hosting on endpoint id {} -> 127.0.0.1:{}", endpoint.id(), targetPort)
+        job =
+            scope.launch {
+                val endpoint = IrohRuntime.endpoint()
+                lookup.publish(endpoint)
+                MCNet.logger.info("hosting on endpoint id {} -> 127.0.0.1:{}", endpoint.id(), targetPort)
 
-            while (isActive) {
-                // Returns null once the endpoint is closed, which is the
-                // normal way this loop ends.
-                val incoming = endpoint.acceptNext() ?: break
-                // Launched as a child of this job, so stop() tears every peer
-                // down with it rather than leaving them running on the
-                // long-lived runtime scope.
-                launch { serve(incoming) }
+                while (isActive) {
+                    // Returns null once the endpoint is closed, which is the
+                    // normal way this loop ends.
+                    val incoming = endpoint.acceptNext() ?: break
+                    // Launched as a child of this job, so stop() tears every peer
+                    // down with it rather than leaving them running on the
+                    // long-lived runtime scope.
+                    launch { serve(incoming) }
+                }
             }
-        }
     }
 
     private suspend fun CoroutineScope.serve(incoming: Incoming) {
-        val connection = try {
-            val accepting = incoming.accept()
+        val connection =
+            try {
+                val accepting = incoming.accept()
 
-            // A probe just wants to know the host is alive. Answering by
-            // completing the handshake and hanging up keeps it out of the peer
-            // count and out of the log, so a client refreshing its server list
-            // does not look like players joining and leaving.
-            if (accepting.alpn().contentEquals(MCNET_PROBE_ALPN)) {
-                val probe = accepting.connect()
-                runCatching { probe.close(0L, "probe acknowledged".toByteArray()) }
+                // A probe just wants to know the host is alive. Answering by
+                // completing the handshake and hanging up keeps it out of the peer
+                // count and out of the log, so a client refreshing its server list
+                // does not look like players joining and leaving.
+                if (accepting.alpn().contentEquals(MCNET_PROBE_ALPN)) {
+                    val probe = accepting.connect()
+                    runCatching { probe.close(0L, "probe acknowledged".toByteArray()) }
+                    return
+                }
+
+                accepting.connect()
+            } catch (e: Exception) {
+                // Retransmitted datagrams and aborted handshakes surface here and
+                // are not worth more than a debug line.
+                MCNet.logger.debug("incoming iroh connection failed", e)
                 return
             }
-
-            accepting.connect()
-        } catch (e: Exception) {
-            // Retransmitted datagrams and aborted handshakes surface here and
-            // are not worth more than a debug line.
-            MCNet.logger.debug("incoming iroh connection failed", e)
-            return
-        }
 
         val peer = runCatching { connection.remoteId().toString() }.getOrDefault("<unknown>")
         connected.incrementAndGet()
@@ -98,16 +100,17 @@ class HostTunnel(
     }
 
     private suspend fun CoroutineScope.openLocalSession(stream: computer.iroh.BiStream) {
-        val socket = try {
-            withContext(Dispatchers.IO) {
-                Socket().apply {
-                    connect(InetSocketAddress(InetAddress.getLoopbackAddress(), targetPort), 10_000)
+        val socket =
+            try {
+                withContext(Dispatchers.IO) {
+                    Socket().apply {
+                        connect(InetSocketAddress(InetAddress.getLoopbackAddress(), targetPort), 10_000)
+                    }
                 }
+            } catch (e: Exception) {
+                MCNet.logger.warn("could not reach the local Minecraft server on port {}", targetPort, e)
+                return
             }
-        } catch (e: Exception) {
-            MCNet.logger.warn("could not reach the local Minecraft server on port {}", targetPort, e)
-            return
-        }
         bridge(socket, stream, this)
     }
 

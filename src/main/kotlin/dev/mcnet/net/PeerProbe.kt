@@ -19,7 +19,6 @@ import kotlinx.coroutines.withTimeout
  * survive game updates.
  */
 object PeerProbe {
-
     enum class Status { ONLINE, OFFLINE, CHECKING }
 
     private const val TIMEOUT_MS = 10_000L
@@ -29,25 +28,26 @@ object PeerProbe {
      *
      * Never throws: an unreachable host is an ordinary answer, not an error.
      */
-    suspend fun isOnline(peerId: String): Boolean = try {
-        val endpoint = IrohRuntime.endpoint()
+    suspend fun isOnline(peerId: String): Boolean =
+        try {
+            val endpoint = IrohRuntime.endpoint()
 
-        // Probing yourself would connect to your own endpoint and report a
-        // misleading "online" for an entry you can never actually join.
-        if (peerId == endpoint.id().toString()) {
-            false
-        } else {
-            withTimeout(TIMEOUT_MS) {
-                val addr = CompositeLookup.DEFAULT.resolve(peerId)
-                val connection = endpoint.connect(addr, MCNET_PROBE_ALPN)
-                runCatching { connection.close(0L, "probe complete".toByteArray()) }
-                true
+            // Probing yourself would connect to your own endpoint and report a
+            // misleading "online" for an entry you can never actually join.
+            if (peerId == endpoint.id().toString()) {
+                false
+            } else {
+                withTimeout(TIMEOUT_MS) {
+                    val addr = CompositeLookup.DEFAULT.resolve(peerId)
+                    val connection = endpoint.connect(addr, MCNET_PROBE_ALPN)
+                    runCatching { connection.close(0L, "probe complete".toByteArray()) }
+                    true
+                }
             }
+        } catch (_: TimeoutCancellationException) {
+            false
+        } catch (e: Exception) {
+            MCNet.logger.debug("probe of {} failed", peerId, e)
+            false
         }
-    } catch (_: TimeoutCancellationException) {
-        false
-    } catch (e: Exception) {
-        MCNet.logger.debug("probe of {} failed", peerId, e)
-        false
-    }
 }

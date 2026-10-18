@@ -4,10 +4,10 @@
 
 	"mcnet.join.title": "Join a peer-to-peer world",
 	"mcnet.join.code": "Join code",
-	"mcnet.join.hint": "Paste a join code or ticket…",
+	"mcnet.join.hint": "Paste a join code or ticket",
 	"mcnet.join.paste": "Ask the host for their MCNet join code.",
 	"mcnet.join.connect": "Connect",
-	"mcnet.join.connecting": "Finding the host…",
+	"mcnet.join.connecting": "Finding the host...",
 	"mcnet.join.empty": "Enter a join code first.",
 	"mcnet.join.identity": "This instance's own id: %s",
 
@@ -21,7 +21,7 @@
 	"mcnet.peers.delete.confirm": "Remove",
 	"mcnet.peers.online": "Online",
 	"mcnet.peers.offline": "Offline",
-	"mcnet.peers.checking": "Checking\u2026",
+	"mcnet.peers.checking": "Checking...",
 	"mcnet.peers.narrate": "%s, %s",
 	"mcnet.peers.refresh": "Refresh",
 
@@ -29,8 +29,8 @@
 	"mcnet.host.code": "Join code",
 	"mcnet.host.start": "Start hosting",
 	"mcnet.host.stop": "Stop hosting",
-	"mcnet.host.starting": "Connecting to the iroh network…",
-	"mcnet.host.live": "Live — %s player(s) connected. Share the code below.",
+	"mcnet.host.starting": "Connecting to the iroh network...",
+	"mcnet.host.live": "Live with %s player(s) connected. Share the code below.",
 	"mcnet.host.idle": "Not hosting. Friends can join without port forwarding.",
 	"mcnet.host.nosingleplayer": "Only singleplayer worlds can be hosted from here."
 }

@@ -17,8 +17,8 @@ classes/
 #
 # runConfigurations is excluded deliberately, not by accident. Loom regenerates
 # the Minecraft Client/Server configs on Gradle sync, and it bakes absolute
-# paths into them — not only $HOME/Developer/... but every dependency jar in
-# ~/.gradle/caches, content hashes and all. They are unusable on another
+# paths into them. That means not only $HOME/Developer/... but every dependency
+# jar in ~/.gradle/caches, content hashes and all. They are unusable on another
 # machine and churn on every version bump.
 
 .idea/*
@@ -69,7 +69,7 @@ replay_*.log
 # mcnet: locally built iroh bindings
 #
 # dht/apply.sh patches a checkout of iroh-ffi, and the jar it produces gets
-# passed to the build with -Pmcnet.irohJar. Neither belongs in the repo — the
+# passed to the build with -Pmcnet.irohJar. Neither belongs in the repo. The
 # patch itself (dht/*.rs, dht/apply.sh) does, and is not matched here.
 
 dht/iroh-ffi/

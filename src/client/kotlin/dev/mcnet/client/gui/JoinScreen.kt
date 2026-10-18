@@ -1,21 +1,21 @@
 package dev.mcnet.client.gui
 
+import dev.mcnet.client.MCNetJoin
+import dev.mcnet.net.IrohRuntime
 import net.minecraft.ChatFormatting
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.StringWidget
-import dev.mcnet.client.MCNetJoin
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
-import dev.mcnet.net.IrohRuntime
 
 /**
  * Asks for a join code, dials the host over iroh, then hands Minecraft the
  * resulting loopback address.
  *
- * From the game's point of view this is an ordinary direct connect — which is
- * the whole trick.
+ * From the game's point of view this is an ordinary direct connect, and that
+ * is the whole trick.
  */
 class JoinScreen(
     private val parent: Screen,
@@ -24,7 +24,6 @@ class JoinScreen(
     /** Failure text to show on open, for the same reason. */
     private val initialError: String? = null,
 ) : Screen(Component.translatable("mcnet.join.title")) {
-
     private lateinit var codeBox: EditBox
     private lateinit var connectButton: Button
     private lateinit var status: StringWidget
@@ -32,14 +31,14 @@ class JoinScreen(
     private var connecting = false
 
     override fun init() {
-        val centreX = width / 2
+        val centerX = width / 2
         val top = height / 4
 
         addRenderableWidget(
-            StringWidget(centreX - 150, top, 300, 20, title, font),
+            StringWidget(centerX - 150, top, 300, 20, title, font),
         )
 
-        codeBox = EditBox(font, centreX - 150, top + 34, 300, 20, Component.translatable("mcnet.join.code"))
+        codeBox = EditBox(font, centerX - 150, top + 34, 300, 20, Component.translatable("mcnet.join.code"))
         // Tickets are long; the endpoint-id form is short. Allow room for both.
         codeBox.setMaxLength(1024)
         codeBox.setHint(Component.translatable("mcnet.join.hint").withStyle(ChatFormatting.DARK_GRAY))
@@ -48,24 +47,28 @@ class JoinScreen(
         codeBox.setResponder { lastCode = it }
         addRenderableWidget(codeBox)
 
-        status = StringWidget(
-            centreX - 150,
-            top + 62,
-            300,
-            20,
-            Component.translatable("mcnet.join.paste").withStyle(ChatFormatting.GRAY),
-            font,
-        )
+        status =
+            StringWidget(
+                centerX - 150,
+                top + 62,
+                300,
+                20,
+                Component.translatable("mcnet.join.paste").withStyle(ChatFormatting.GRAY),
+                font,
+            )
         addRenderableWidget(status)
 
-        connectButton = Button.builder(Component.translatable("mcnet.join.connect")) { connect() }
-            .bounds(centreX - 154, top + 94, 150, 20)
-            .build()
+        connectButton =
+            Button
+                .builder(Component.translatable("mcnet.join.connect")) { connect() }
+                .bounds(centerX - 154, top + 94, 150, 20)
+                .build()
         addRenderableWidget(connectButton)
 
         addRenderableWidget(
-            Button.builder(Component.translatable("gui.cancel")) { onClose() }
-                .bounds(centreX + 4, top + 94, 150, 20)
+            Button
+                .builder(Component.translatable("gui.cancel")) { onClose() }
+                .bounds(centerX + 4, top + 94, 150, 20)
                 .build(),
         )
 
@@ -73,11 +76,12 @@ class JoinScreen(
         // the same config" trap obvious instead of invisible.
         addRenderableWidget(
             StringWidget(
-                centreX - 150,
+                centerX - 150,
                 top + 122,
                 300,
                 20,
-                Component.translatable("mcnet.join.identity", IrohRuntime.localIdShort())
+                Component
+                    .translatable("mcnet.join.identity", IrohRuntime.localIdShort())
                     .withStyle(ChatFormatting.DARK_GRAY),
                 font,
             ),
@@ -109,8 +113,11 @@ class JoinScreen(
         }
     }
 
-    private fun setStatus(key: String, colour: ChatFormatting) {
-        status.message = Component.translatable(key).withStyle(colour)
+    private fun setStatus(
+        key: String,
+        color: ChatFormatting,
+    ) {
+        status.message = Component.translatable(key).withStyle(color)
     }
 
     override fun onClose() {

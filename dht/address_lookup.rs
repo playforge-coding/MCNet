@@ -12,7 +12,7 @@ use crate::IrohError;
 ///
 /// This wraps the *builder* rather than a built lookup, deliberately.
 /// `Builder::build` opens a UDP socket that has to be registered with the Tokio
-/// reactor, so it must run inside the runtime — which is exactly what iroh does
+/// reactor, so it must run inside the runtime. That is exactly what iroh does
 /// when it calls [`AddressLookupBuilder::into_address_lookup`] during `bind()`.
 /// A plain synchronous UniFFI constructor runs on whatever foreign thread
 /// called it, with no runtime in scope, and would fail.

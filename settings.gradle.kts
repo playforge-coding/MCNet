@@ -7,7 +7,7 @@ pluginManagement {
 }
 
 plugins {
-    // Lets Gradle download the JDK 25 toolchain Minecraft 26.2 needs, so the
+    // Lets Gradle download the JDK 25 toolchain Minecraft 26.3 needs, so the
     // build does not depend on which JDK happens to launch Gradle.
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }

@@ -38,7 +38,7 @@ object MCNet : ModInitializer {
             }
         }
 
-        // Stop tunnelling before the server tears down its own listener, so
+        // Stop tunneling before the server tears down its own listener, so
         // peers see a clean disconnect rather than a hang.
         ServerLifecycleEvents.SERVER_STOPPING.register { stopHosting() }
 
@@ -46,28 +46,35 @@ object MCNet : ModInitializer {
     }
 
     /** The two forms of join code handed out once hosting starts. */
-    data class JoinCodes(val endpointId: String, val ticket: String)
+    data class JoinCodes(
+        val endpointId: String,
+        val ticket: String,
+    )
 
     /**
      * Starts hosting this server.
      *
      * Opening the world to LAN has to happen on the caller's (server) thread,
      * but binding the iroh endpoint involves a relay handshake that can take
-     * seconds — so the join codes arrive through [onReady] rather than a
+     * seconds. So the join codes arrive through [onReady] rather than as a
      * return value. [onReady] runs on a background thread.
      */
-    fun startHosting(server: MinecraftServer, onReady: (Result<JoinCodes>) -> Unit) {
+    fun startHosting(
+        server: MinecraftServer,
+        onReady: (Result<JoinCodes>) -> Unit,
+    ) {
         if (isHosting) {
             IrohRuntime.scope.launch { onReady(currentJoinCodes()) }
             return
         }
 
-        val port = try {
-            HostCommands.ensurePublished(server)
-        } catch (e: Exception) {
-            onReady(Result.failure(e))
-            return
-        }
+        val port =
+            try {
+                HostCommands.ensurePublished(server)
+            } catch (e: Exception) {
+                onReady(Result.failure(e))
+                return
+            }
 
         val tunnel = HostTunnel(port, IrohRuntime.scope)
         tunnel.start()
@@ -80,13 +87,14 @@ object MCNet : ModInitializer {
         }
     }
 
-    private suspend fun currentJoinCodes(): Result<JoinCodes> = runCatching {
-        // Wait for a usable network path first: a ticket minted before the
-        // relay handshake finishes may not list a relay, and would then only
-        // work for peers on the same LAN.
-        IrohRuntime.awaitOnline()
-        JoinCodes(IrohRuntime.endpointId(), IrohRuntime.ticket())
-    }
+    private suspend fun currentJoinCodes(): Result<JoinCodes> =
+        runCatching {
+            // Wait for a usable network path first: a ticket minted before the
+            // relay handshake finishes may not list a relay, and would then only
+            // work for peers on the same LAN.
+            IrohRuntime.awaitOnline()
+            JoinCodes(IrohRuntime.endpointId(), IrohRuntime.ticket())
+        }
 
     fun stopHosting() {
         host?.stop()

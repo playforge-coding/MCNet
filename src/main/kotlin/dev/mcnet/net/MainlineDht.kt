@@ -10,7 +10,7 @@ import dev.mcnet.MCNet
  * Reached reflectively, deliberately. The published `computer.iroh:iroh`
  * artifact does not ship `DhtAddressLookup`; it only exists in bindings built
  * from a patched iroh-ffi (see `dht/apply.sh` in this repository). Reflection
- * means one MCNet build runs against either jar — dropping in the patched one
+ * means one MCNet build runs against either jar. Dropping in the patched one
  * and flipping `addressLookup` in the config activates the DHT with no code
  * change and no second artifact to maintain.
  *
@@ -40,21 +40,27 @@ object MainlineDht {
      * @return true if the lookup was attached; false if these bindings do not
      *   support it, in which case the endpoint keeps the preset's own resolver.
      */
-    fun attach(builder: EndpointBuilder, publish: Boolean, unfiltered: Boolean = false): Boolean {
-        val cls = lookupClass() ?: run {
-            MCNet.logger.warn(
-                "addressLookup=dht was requested, but these iroh bindings have no {}. " +
-                    "Falling back to the preset's resolver. See dht/README.md to build " +
-                    "bindings with DHT support.",
-                LOOKUP_CLASS,
-            )
-            return false
-        }
+    fun attach(
+        builder: EndpointBuilder,
+        publish: Boolean,
+        unfiltered: Boolean = false,
+    ): Boolean {
+        val cls =
+            lookupClass() ?: run {
+                MCNet.logger.warn(
+                    "addressLookup=dht was requested, but these iroh bindings have no {}. " +
+                        "Falling back to the preset's resolver. See dht/README.md to build " +
+                        "bindings with DHT support.",
+                    LOOKUP_CLASS,
+                )
+                return false
+            }
 
         return runCatching {
-            val lookup = cls
-                .getConstructor(Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
-                .newInstance(publish, unfiltered)
+            val lookup =
+                cls
+                    .getConstructor(Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+                    .newInstance(publish, unfiltered)
 
             EndpointBuilder::class.java
                 .getMethod("addressLookup", cls)
@@ -67,7 +73,7 @@ object MainlineDht {
             // different patch than the one this mod expects; say so plainly
             // rather than failing later with something cryptic.
             MCNet.logger.error(
-                "found {} but could not attach it — are these bindings built from dht/apply.sh?",
+                "found {} but could not attach it. Were these bindings built from dht/apply.sh?",
                 LOOKUP_CLASS,
                 it,
             )

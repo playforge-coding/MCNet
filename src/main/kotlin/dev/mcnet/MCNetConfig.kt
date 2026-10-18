@@ -32,8 +32,8 @@ object MCNetConfig {
         N0,
 
         /**
-         * pkarr records on the BitTorrent Mainline DHT — no dependency on n0's
-         * infrastructure. Requires bindings built from `dht/apply.sh`; MCNet
+         * pkarr records on the BitTorrent Mainline DHT, with no dependency on
+         * n0's infrastructure. Requires bindings built from `dht/apply.sh`; MCNet
          * logs a warning and falls back to [N0] if they are not present.
          */
         DHT,
@@ -76,19 +76,21 @@ object MCNetConfig {
     }
 
     /** The persistent endpoint identity, generated and stored on first use. */
-    fun secretKey(): SecretKey = cachedKey ?: SecretKey.generate().also {
-        cachedKey = it
-        MCNet.logger.info("generated a new MCNet identity")
-        save()
-    }
+    fun secretKey(): SecretKey =
+        cachedKey ?: SecretKey.generate().also {
+            cachedKey = it
+            MCNet.logger.info("generated a new MCNet identity")
+            save()
+        }
 
     fun save() {
-        val root = JsonObject().apply {
-            addProperty("autoHost", autoHost)
-            addProperty("addressLookup", addressLookup.name.lowercase())
-            addProperty("dhtPublish", dhtPublish)
-            cachedKey?.let { addProperty("secretKey", HexFormat.of().formatHex(it.toBytes())) }
-        }
+        val root =
+            JsonObject().apply {
+                addProperty("autoHost", autoHost)
+                addProperty("addressLookup", addressLookup.name.lowercase())
+                addProperty("dhtPublish", dhtPublish)
+                cachedKey?.let { addProperty("secretKey", HexFormat.of().formatHex(it.toBytes())) }
+            }
         runCatching {
             Files.createDirectories(path.parent)
             Files.writeString(path, gson.toJson(root))

@@ -1,6 +1,7 @@
 plugins {
-    id("net.fabricmc.fabric-loom") version "1.17-SNAPSHOT"
-    kotlin("jvm") version "2.4.10"
+    id("net.fabricmc.fabric-loom") version "1.19.1"
+    kotlin("jvm") version "2.4.21"
+    id("com.diffplug.spotless") version "8.10.4"
 }
 
 version = property("mod_version") as String
@@ -27,7 +28,7 @@ loom {
 
 // Dependencies that must travel inside the built jar, because they are not
 // shipped by Minecraft, Fabric Loader or fabric-language-kotlin.
-val bundled: Configuration by configurations.creating
+val bundled: Configuration = configurations.create("bundled")
 
 dependencies {
     minecraft("com.mojang:minecraft:${property("minecraft_version")}")
@@ -105,4 +106,20 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.jar {
     from("LICENSE") { rename { "${it}_${base.archivesName.get()}" } }
+}
+
+// ktlint lints and formats. Spotless hooks spotlessCheck into `check`, so a
+// plain `./gradlew build` fails on unformatted code; `./gradlew spotlessApply`
+// fixes it. Rule tweaks live in .editorconfig, where IDEs pick them up too.
+val ktlintVersion = "1.8.0"
+
+spotless {
+    kotlin {
+        target("src/**/*.kt")
+        ktlint(ktlintVersion)
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint(ktlintVersion)
+    }
 }

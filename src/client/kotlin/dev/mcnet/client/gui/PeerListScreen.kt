@@ -22,13 +22,14 @@ import java.util.concurrent.ConcurrentHashMap
  * The worlds this client has joined over MCNet, with live reachability and
  * one-click rejoin.
  *
- * Deliberately built the same way the vanilla server list is — a
- * [HeaderAndFooterLayout] wrapping an [ObjectSelectionList] — so it inherits
- * scrolling, keyboard navigation, narration and selection behaviour instead of
- * approximating them.
+ * Deliberately built the same way the vanilla server list is: a
+ * [HeaderAndFooterLayout] wrapping an [ObjectSelectionList]. That way it
+ * inherits scrolling, keyboard navigation, narration and selection behavior
+ * instead of approximating them.
  */
-class PeerListScreen(private val parent: Screen) : Screen(Component.translatable("mcnet.peers.title")) {
-
+class PeerListScreen(
+    private val parent: Screen,
+) : Screen(Component.translatable("mcnet.peers.title")) {
     private val layout = HeaderAndFooterLayout(this, 33, 60)
     private val status = ConcurrentHashMap<String, PeerProbe.Status>()
 
@@ -39,33 +40,44 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
     override fun init() {
         layout.addTitleHeader(title, font)
 
-        list = layout.addToContents(
-            PeerList(minecraft!!, width, layout.contentHeight, layout.headerHeight),
-        )
+        list =
+            layout.addToContents(
+                PeerList(minecraft, width, layout.contentHeight, layout.headerHeight),
+            )
 
         val footer = layout.addToFooter(LinearLayout.vertical().spacing(4))
         footer.defaultCellSetting().alignHorizontallyCenter()
         val topRow = footer.addChild(LinearLayout.horizontal().spacing(4))
         val bottomRow = footer.addChild(LinearLayout.horizontal().spacing(4))
 
-        joinButton = topRow.addChild(
-            Button.builder(Component.translatable("mcnet.peers.join")) {
-                list.selected?.join()
-            }.width(100).build(),
-        )
+        joinButton =
+            topRow.addChild(
+                Button
+                    .builder(Component.translatable("mcnet.peers.join")) {
+                        list.selected?.join()
+                    }.width(100)
+                    .build(),
+            )
         topRow.addChild(
-            Button.builder(Component.translatable("mcnet.peers.add")) {
-                minecraft!!.gui.setScreen(JoinScreen(this))
-            }.width(100).build(),
+            Button
+                .builder(Component.translatable("mcnet.peers.add")) {
+                    minecraft.gui.setScreen(JoinScreen(this))
+                }.width(100)
+                .build(),
         )
 
-        deleteButton = bottomRow.addChild(
-            Button.builder(Component.translatable("mcnet.peers.delete")) { confirmDelete() }
-                .width(74).build(),
-        )
+        deleteButton =
+            bottomRow.addChild(
+                Button
+                    .builder(Component.translatable("mcnet.peers.delete")) { confirmDelete() }
+                    .width(74)
+                    .build(),
+            )
         bottomRow.addChild(
-            Button.builder(Component.translatable("mcnet.peers.refresh")) { refreshAll() }
-                .width(74).build(),
+            Button
+                .builder(Component.translatable("mcnet.peers.refresh")) { refreshAll() }
+                .width(74)
+                .build(),
         )
         bottomRow.addChild(
             Button.builder(CommonComponents.GUI_BACK) { onClose() }.width(74).build(),
@@ -95,14 +107,14 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
 
     private fun confirmDelete() {
         val entry = list.selected ?: return
-        minecraft!!.gui.setScreen(
+        minecraft.gui.setScreen(
             ConfirmScreen(
                 { confirmed ->
                     if (confirmed) {
                         PeerStore.forget(entry.peer.id)
                         status.remove(entry.peer.id)
                     }
-                    minecraft!!.gui.setScreen(this)
+                    minecraft.gui.setScreen(this)
                 },
                 Component.translatable("mcnet.peers.delete.title"),
                 Component.translatable("mcnet.peers.delete.warning", entry.peer.name),
@@ -126,7 +138,7 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
     }
 
     override fun onClose() {
-        minecraft!!.gui.setScreen(parent)
+        minecraft.gui.setScreen(parent)
     }
 
     /** The scrolling list itself. */
@@ -136,7 +148,6 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
         height: Int,
         y: Int,
     ) : ObjectSelectionList<PeerList.PeerEntry>(minecraft, width, height, y, ROW_HEIGHT) {
-
         fun reload() {
             clearEntries()
             PeerStore.all().forEach { addEntry(PeerEntry(it)) }
@@ -147,8 +158,9 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
             onSelectionChanged()
         }
 
-        inner class PeerEntry(val peer: PeerStore.Peer) : ObjectSelectionList.Entry<PeerEntry>() {
-
+        inner class PeerEntry(
+            val peer: PeerStore.Peer,
+        ) : ObjectSelectionList.Entry<PeerEntry>() {
             override fun getNarration(): Component =
                 Component.translatable("mcnet.peers.narrate", peer.name, statusText())
 
@@ -167,7 +179,7 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
                     PeerStore.shorten(peer.id),
                     contentX + 4,
                     contentY + 1 + font.lineHeight + 2,
-                    GREY,
+                    GRAY,
                 )
 
                 // Status sits right-aligned, mirroring where the vanilla list
@@ -178,11 +190,14 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
                     label,
                     contentRight - font.width(label) - 4,
                     contentY + 1,
-                    statusColour(),
+                    statusColor(),
                 )
             }
 
-            override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+            override fun mouseClicked(
+                event: MouseButtonEvent,
+                doubleClick: Boolean,
+            ): Boolean {
                 this@PeerList.setSelected(this)
                 // Double-click to join, matching the vanilla server list.
                 if (doubleClick) join()
@@ -194,23 +209,25 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
                     // Surfacing the reason needs a screen that still exists;
                     // the join screen owns that conversation, so hand it over
                     // with the code prefilled.
-                    minecraft!!.gui.setScreen(JoinScreen(this@PeerListScreen, peer.id, reason))
+                    minecraft.gui.setScreen(JoinScreen(this@PeerListScreen, peer.id, reason))
                 }
             }
 
             private fun state() = status[peer.id] ?: PeerProbe.Status.CHECKING
 
-            private fun statusText(): Component = when (state()) {
-                PeerProbe.Status.ONLINE -> Component.translatable("mcnet.peers.online")
-                PeerProbe.Status.OFFLINE -> Component.translatable("mcnet.peers.offline")
-                PeerProbe.Status.CHECKING -> Component.translatable("mcnet.peers.checking")
-            }
+            private fun statusText(): Component =
+                when (state()) {
+                    PeerProbe.Status.ONLINE -> Component.translatable("mcnet.peers.online")
+                    PeerProbe.Status.OFFLINE -> Component.translatable("mcnet.peers.offline")
+                    PeerProbe.Status.CHECKING -> Component.translatable("mcnet.peers.checking")
+                }
 
-            private fun statusColour(): Int = when (state()) {
-                PeerProbe.Status.ONLINE -> GREEN
-                PeerProbe.Status.OFFLINE -> RED
-                PeerProbe.Status.CHECKING -> GREY
-            }
+            private fun statusColor(): Int =
+                when (state()) {
+                    PeerProbe.Status.ONLINE -> GREEN
+                    PeerProbe.Status.OFFLINE -> RED
+                    PeerProbe.Status.CHECKING -> GRAY
+                }
         }
     }
 
@@ -219,7 +236,7 @@ class PeerListScreen(private val parent: Screen) : Screen(Component.translatable
 
         // ARGB, matching the palette the vanilla list uses for its own labels.
         const val WHITE = -1
-        const val GREY = -8355712
+        const val GRAY = -8355712
         val GREEN = 0xFF55FF55.toInt()
         val RED = 0xFFFF5555.toInt()
     }

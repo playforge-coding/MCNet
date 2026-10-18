@@ -15,27 +15,27 @@ import java.io.IOException
 import java.net.ServerSocket
 
 /**
- * `/mcnet` — the hosting side, available in singleplayer (through the
- * integrated server) and on dedicated servers alike.
+ * The `/mcnet` command, which handles hosting. It works in singleplayer
+ * (through the integrated server) and on dedicated servers alike.
  */
 object HostCommands {
-
     fun build(): LiteralArgumentBuilder<CommandSourceStack> =
-        Commands.literal("mcnet")
+        Commands
+            .literal("mcnet")
             .then(
-                Commands.literal("host")
+                Commands
+                    .literal("host")
                     // Exposing a server to the internet is an admin decision.
                     // Singleplayer hosts use the pause-menu button instead,
                     // which avoids requiring cheats just to open a world.
                     .requires { it.permissions().hasPermission(Permissions.COMMANDS_ADMIN) }
                     .executes(::host),
-            )
-            .then(
-                Commands.literal("stop")
+            ).then(
+                Commands
+                    .literal("stop")
                     .requires { it.permissions().hasPermission(Permissions.COMMANDS_ADMIN) }
                     .executes(::stop),
-            )
-            .then(Commands.literal("status").executes(::status))
+            ).then(Commands.literal("status").executes(::status))
 
     private fun host(context: com.mojang.brigadier.context.CommandContext<CommandSourceStack>): Int {
         val source = context.source
@@ -46,7 +46,7 @@ object HostCommands {
             return 0
         }
 
-        source.sendSuccess({ Component.literal("Starting MCNet…") }, false)
+        source.sendSuccess({ Component.literal("Starting MCNet...") }, false)
 
         MCNet.startHosting(server) { result ->
             // Hop back onto the server thread before touching command output.
@@ -65,22 +65,31 @@ object HostCommands {
         return Command.SINGLE_SUCCESS
     }
 
-    private fun announce(source: CommandSourceStack, codes: MCNet.JoinCodes) {
+    private fun announce(
+        source: CommandSourceStack,
+        codes: MCNet.JoinCodes,
+    ) {
         source.sendSuccess({
-            Component.literal("MCNet is live. Friends can join with:")
+            Component
+                .literal("MCNet is live. Friends can join with:")
                 .withStyle(ChatFormatting.GREEN)
         }, false)
         source.sendSuccess({ copyable(codes.endpointId, "Join code (permanent)") }, false)
         source.sendSuccess({ copyable(codes.ticket, "Ticket (includes current addresses)") }, false)
         source.sendSuccess({
-            Component.literal("Anyone with the join code can connect — share it like a party invite.")
+            Component
+                .literal("Anyone with the join code can connect, so share it like a party invite.")
                 .withStyle(ChatFormatting.GRAY)
         }, false)
     }
 
     /** Renders a code the player can click to copy to their clipboard. */
-    private fun copyable(value: String, label: String): Component =
-        Component.literal("$label: ")
+    private fun copyable(
+        value: String,
+        label: String,
+    ): Component =
+        Component
+            .literal("$label: ")
             .withStyle(ChatFormatting.GRAY)
             .append(
                 Component.literal(value).withStyle(
@@ -110,7 +119,8 @@ object HostCommands {
             return Command.SINGLE_SUCCESS
         }
         source.sendSuccess({
-            Component.literal("MCNet is hosting — ${tunnel.peerCount} peer(s) connected.")
+            Component
+                .literal("MCNet is hosting with ${tunnel.peerCount} peer(s) connected.")
                 .withStyle(ChatFormatting.GREEN)
         }, false)
         return Command.SINGLE_SUCCESS
@@ -120,7 +130,7 @@ object HostCommands {
      * Makes sure the server is actually listening on a TCP port, and returns it.
      *
      * A dedicated server always is. An integrated server only starts its
-     * listener when the world is opened to LAN, so we do that here — MCNet
+     * listener when the world is opened to LAN, so we do that here. MCNet
      * then dials it over loopback like any other LAN client.
      *
      * Must be called on the server thread.
@@ -129,12 +139,15 @@ object HostCommands {
         if (server.isPublished) return server.port
 
         val port = findFreePort()
-        val published = server.publishServer(
-            MinecraftServer.MultiplayerScope.LAN,
-            server.defaultGameType,
-            false,
-            port,
-        )
+        // Same call the vanilla /publish command makes. Game mode is no longer
+        // part of publishing (26.3 moved it to its own setting), so opening the
+        // listener leaves every player's mode as it was.
+        val published =
+            server.publishServer(
+                MinecraftServer.MultiplayerScope.LAN,
+                false,
+                port,
+            )
         if (!published) {
             throw IllegalStateException("Minecraft refused to open this world to LAN on port $port")
         }
@@ -145,13 +158,14 @@ object HostCommands {
      * Asks the OS for a free port by binding one and immediately releasing it.
      *
      * There is an unavoidable race between closing this socket and Minecraft
-     * binding the same port, but it is the same approach the vanilla
-     * "Open to LAN" screen uses, and a collision surfaces as a clean failure
+     * binding the same port, but it is the same approach the vanilla World
+     * Options screen uses for its LAN port, and a collision surfaces as a clean failure
      * from publishServer rather than something subtle.
      */
-    private fun findFreePort(): Int = try {
-        ServerSocket(0).use { it.localPort }
-    } catch (e: IOException) {
-        throw IllegalStateException("no free port available for the local Minecraft listener", e)
-    }
+    private fun findFreePort(): Int =
+        try {
+            ServerSocket(0).use { it.localPort }
+        } catch (e: IOException) {
+            throw IllegalStateException("no free port available for the local Minecraft listener", e)
+        }
 }

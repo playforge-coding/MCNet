@@ -36,9 +36,10 @@ object IrohRuntime {
     private var endpoint: Endpoint? = null
 
     /** Binds the endpoint on first use and returns the shared instance. */
-    suspend fun endpoint(): Endpoint = lock.withLock {
-        endpoint?.takeIf { !it.isClosed() } ?: bind().also { endpoint = it }
-    }
+    suspend fun endpoint(): Endpoint =
+        lock.withLock {
+            endpoint?.takeIf { !it.isClosed() } ?: bind().also { endpoint = it }
+        }
 
     /** The endpoint if one is already bound, without binding one. */
     fun endpointOrNull(): Endpoint? = endpoint?.takeIf { !it.isClosed() }
@@ -85,8 +86,7 @@ object IrohRuntime {
      * config/mcnet.json share an identity, and that is otherwise invisible
      * until a join mysteriously fails.
      */
-    fun localIdShort(): String =
-        runCatching { MCNetConfig.secretKey().`public`().fmtShort() }.getOrDefault("unknown")
+    fun localIdShort(): String = runCatching { MCNetConfig.secretKey().`public`().fmtShort() }.getOrDefault("unknown")
 
     /**
      * Waits until the endpoint has a working path to the network. Worth doing

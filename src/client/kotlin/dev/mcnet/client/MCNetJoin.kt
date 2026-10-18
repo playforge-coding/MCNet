@@ -17,11 +17,10 @@ import java.net.InetSocketAddress
  * The one path from "a join code" to "Minecraft is connecting".
  *
  * Shared by the paste-a-code screen and the saved peer list so the two cannot
- * drift apart — in particular so both record the peer and both tear down a
+ * drift apart. In particular, both record the peer and both tear down a
  * previous tunnel before starting a new one.
  */
 object MCNetJoin {
-
     /**
      * Resolves [code], opens a tunnel, and hands the result to Minecraft.
      *
@@ -57,15 +56,20 @@ object MCNetJoin {
         }
     }
 
-    private fun handOff(parent: Screen, shortId: String, local: InetSocketAddress) {
+    private fun handOff(
+        parent: Screen,
+        shortId: String,
+        local: InetSocketAddress,
+    ) {
         val minecraft = Minecraft.getInstance()
-        val data = ServerData(
-            "MCNet: $shortId",
-            "${local.hostString}:${local.port}",
-            // OTHER rather than LAN: this is not a LAN-discovered server, and
-            // marking it LAN would change how the client treats the entry.
-            ServerData.Type.OTHER,
-        )
+        val data =
+            ServerData(
+                "MCNet: $shortId",
+                "${local.hostString}:${local.port}",
+                // OTHER rather than LAN: this is not a LAN-discovered server, and
+                // marking it LAN would change how the client treats the entry.
+                ServerData.Type.OTHER,
+            )
         ConnectScreen.startConnecting(
             parent,
             minecraft,

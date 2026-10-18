@@ -33,33 +33,50 @@ object MCNetScreens {
     }
 
     /** "Join via MCNet" in the top-right of the server list. */
-    private fun addJoinButton(screen: JoinMultiplayerScreen, width: Int) {
-        val button = Button.builder(Component.translatable("mcnet.button.join")) {
-            Minecraft.getInstance().gui.setScreen(PeerListScreen(screen))
-        }.bounds(width - BUTTON_WIDTH - MARGIN, MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT).build()
+    private fun addJoinButton(
+        screen: JoinMultiplayerScreen,
+        width: Int,
+    ) {
+        val button =
+            Button
+                .builder(Component.translatable("mcnet.button.join")) {
+                    Minecraft.getInstance().gui.setScreen(PeerListScreen(screen))
+                }.bounds(width - BUTTON_WIDTH - MARGIN, MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build()
 
         addWidget(screen, button)
     }
 
     /**
-     * "Host with MCNet" on the pause menu, mirroring where "Open to LAN" lives.
+     * "Host with MCNet" on the pause menu, next to vanilla's own LAN controls.
      *
-     * Only offered for singleplayer worlds — on a server the player is not the
+     * Only offered for singleplayer worlds. On a server the player is not the
      * host, and dedicated servers use `/mcnet host` instead.
      */
-    private fun addHostButton(screen: PauseScreen, singleplayer: Boolean) {
+    private fun addHostButton(
+        screen: PauseScreen,
+        singleplayer: Boolean,
+    ) {
         if (!singleplayer || !screen.showsPauseMenu()) return
 
-        val button = Button.builder(Component.translatable("mcnet.button.host")) {
-            Minecraft.getInstance().gui.setScreen(HostScreen(screen))
-        }.bounds(MARGIN, MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT).build()
+        val button =
+            Button
+                .builder(Component.translatable("mcnet.button.host")) {
+                    Minecraft.getInstance().gui.setScreen(HostScreen(screen))
+                }.bounds(MARGIN, MARGIN, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build()
 
         addWidget(screen, button)
     }
 
-    private fun addWidget(screen: Screen, button: Button) {
+    private fun addWidget(
+        screen: Screen,
+        button: Button,
+    ) {
         // Screen#addRenderableWidget is protected; the screen API exposes the
         // same list so widgets added here take part in rendering and input.
-        net.fabricmc.fabric.api.client.screen.v1.Screens.getWidgets(screen).add(button)
+        net.fabricmc.fabric.api.client.screen.v1.Screens
+            .getWidgets(screen)
+            .add(button)
     }
 }

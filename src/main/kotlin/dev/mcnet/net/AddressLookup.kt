@@ -14,8 +14,8 @@ import computer.iroh.EndpointTicket
  * the `n0` preset, but the same role can be served by the BitTorrent Mainline
  * DHT (`iroh-mainline-address-lookup`, pkarr records signed by the endpoint
  * key). Swapping to the DHT means adding an implementation here and building
- * the endpoint against bindings that expose it — not touching the tunnels, the
- * commands, or the UI.
+ * the endpoint against bindings that expose it. The tunnels, the commands and
+ * the UI stay untouched.
  */
 interface AddressLookup {
     /** Short name, used in log lines and command feedback. */
@@ -42,22 +42,20 @@ interface AddressLookup {
  * Resolves a full iroh ticket: a base32 blob carrying the endpoint id, its home
  * relay and any directly reachable addresses.
  *
- * Self-contained, so it works without consulting any resolver at all — the
- * fallback when discovery infrastructure is unreachable. The cost is that a
+ * Self-contained, so it works without consulting any resolver at all. That
+ * makes it the fallback when discovery infrastructure is unreachable. The cost is that a
  * ticket goes stale if the host's relay changes.
  */
 object TicketLookup : AddressLookup {
     override val id = "ticket"
 
-    override fun handles(code: String): Boolean =
-        runCatching { EndpointTicket.fromString(code) }.isSuccess
+    override fun handles(code: String): Boolean = runCatching { EndpointTicket.fromString(code) }.isSuccess
 
-    override suspend fun resolve(code: String): EndpointAddr =
-        EndpointTicket.fromString(code).endpointAddr()
+    override suspend fun resolve(code: String): EndpointAddr = EndpointTicket.fromString(code).endpointAddr()
 }
 
 /**
- * Resolves a bare endpoint id — the host's permanent public key.
+ * Resolves a bare endpoint id, which is the host's permanent public key.
  *
  * The returned address carries no relay and no direct addresses, which is the
  * point: iroh treats that as "find this for me" and hands it to the endpoint's
@@ -68,25 +66,27 @@ object TicketLookup : AddressLookup {
 object EndpointIdLookup : AddressLookup {
     override val id = "endpoint-id"
 
-    override fun handles(code: String): Boolean =
-        runCatching { EndpointId.fromString(code) }.isSuccess
+    override fun handles(code: String): Boolean = runCatching { EndpointId.fromString(code) }.isSuccess
 
     override suspend fun resolve(code: String): EndpointAddr =
         EndpointAddr(EndpointId.fromString(code), null, emptyList())
 }
 
 /** Tries each lookup in turn, so players can paste either form of join code. */
-class CompositeLookup(private val delegates: List<AddressLookup>) : AddressLookup {
+class CompositeLookup(
+    private val delegates: List<AddressLookup>,
+) : AddressLookup {
     override val id = delegates.joinToString("+") { it.id }
 
     override fun handles(code: String) = delegates.any { it.handles(code) }
 
     override suspend fun resolve(code: String): EndpointAddr {
         val trimmed = code.trim()
-        val delegate = delegates.firstOrNull { it.handles(trimmed) }
-            ?: throw IllegalArgumentException(
-                "Not a recognised MCNet join code. Expected an iroh ticket or an endpoint id.",
-            )
+        val delegate =
+            delegates.firstOrNull { it.handles(trimmed) }
+                ?: throw IllegalArgumentException(
+                    "Not a recognized MCNet join code. Expected an iroh ticket or an endpoint id.",
+                )
         return delegate.resolve(trimmed)
     }
 

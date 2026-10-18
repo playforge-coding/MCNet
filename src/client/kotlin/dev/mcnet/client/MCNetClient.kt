@@ -8,7 +8,6 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 
 object MCNetClient : ClientModInitializer {
-
     /**
      * The tunnel backing the session the player is currently in, if they joined
      * through MCNet. Held so it can be torn down on disconnect rather than

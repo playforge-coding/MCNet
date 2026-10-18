@@ -16,8 +16,9 @@ import net.minecraft.network.chat.Component
  * This is the singleplayer counterpart to `/mcnet host`, and exists mainly so
  * that hosting does not require cheats to be enabled just to run a command.
  */
-class HostScreen(private val parent: Screen) : Screen(Component.translatable("mcnet.host.title")) {
-
+class HostScreen(
+    private val parent: Screen,
+) : Screen(Component.translatable("mcnet.host.title")) {
     private lateinit var status: StringWidget
     private lateinit var codeBox: EditBox
     private lateinit var actionButton: Button
@@ -25,30 +26,33 @@ class HostScreen(private val parent: Screen) : Screen(Component.translatable("mc
     private var starting = false
 
     override fun init() {
-        val centreX = width / 2
+        val centerX = width / 2
         val top = height / 4
 
-        addRenderableWidget(StringWidget(centreX - 150, top, 300, 20, title, font))
+        addRenderableWidget(StringWidget(centerX - 150, top, 300, 20, title, font))
 
-        status = StringWidget(centreX - 150, top + 30, 300, 20, Component.empty(), font)
+        status = StringWidget(centerX - 150, top + 30, 300, 20, Component.empty(), font)
         addRenderableWidget(status)
 
         // An edit box rather than a label: it makes the code selectable and
         // copyable with the usual keyboard shortcuts, which a StringWidget
         // cannot offer.
-        codeBox = EditBox(font, centreX - 150, top + 56, 300, 20, Component.translatable("mcnet.host.code"))
+        codeBox = EditBox(font, centerX - 150, top + 56, 300, 20, Component.translatable("mcnet.host.code"))
         codeBox.setMaxLength(1024)
         codeBox.setEditable(false)
         addRenderableWidget(codeBox)
 
-        actionButton = Button.builder(Component.empty()) { toggleHosting() }
-            .bounds(centreX - 154, top + 90, 150, 20)
-            .build()
+        actionButton =
+            Button
+                .builder(Component.empty()) { toggleHosting() }
+                .bounds(centerX - 154, top + 90, 150, 20)
+                .build()
         addRenderableWidget(actionButton)
 
         addRenderableWidget(
-            Button.builder(Component.translatable("gui.done")) { onClose() }
-                .bounds(centreX + 4, top + 90, 150, 20)
+            Button
+                .builder(Component.translatable("gui.done")) { onClose() }
+                .bounds(centerX + 4, top + 90, 150, 20)
                 .build(),
         )
 
@@ -57,19 +61,26 @@ class HostScreen(private val parent: Screen) : Screen(Component.translatable("mc
 
     private fun refresh() {
         val hosting = MCNet.isHosting
-        actionButton.message = Component.translatable(
-            if (hosting) "mcnet.host.stop" else "mcnet.host.start",
-        )
+        actionButton.message =
+            Component.translatable(
+                if (hosting) "mcnet.host.stop" else "mcnet.host.start",
+            )
         actionButton.active = !starting
 
         when {
-            starting -> status.message =
-                Component.translatable("mcnet.host.starting").withStyle(ChatFormatting.YELLOW)
+            starting -> {
+                status.message =
+                    Component.translatable("mcnet.host.starting").withStyle(ChatFormatting.YELLOW)
+            }
 
-            hosting -> status.message = Component.translatable(
-                "mcnet.host.live",
-                MCNet.host?.peerCount ?: 0,
-            ).withStyle(ChatFormatting.GREEN)
+            hosting -> {
+                status.message =
+                    Component
+                        .translatable(
+                            "mcnet.host.live",
+                            MCNet.host?.peerCount ?: 0,
+                        ).withStyle(ChatFormatting.GREEN)
+            }
 
             else -> {
                 status.message =
@@ -112,8 +123,10 @@ class HostScreen(private val parent: Screen) : Screen(Component.translatable("mc
                     onFailure = { error ->
                         MCNet.logger.error("hosting failed", error)
                         refresh()
-                        status.message = Component.literal(error.message ?: "Could not start hosting")
-                            .withStyle(ChatFormatting.RED)
+                        status.message =
+                            Component
+                                .literal(error.message ?: "Could not start hosting")
+                                .withStyle(ChatFormatting.RED)
                     },
                 )
             }

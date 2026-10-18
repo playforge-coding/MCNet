@@ -39,7 +39,7 @@ if "iroh-mainline-address-lookup" in s:
 else:
     anchor = 'iroh = { version = "1.0.0" }\n'
     assert anchor in s, "could not find the `iroh` dependency to anchor against"
-    s = s.replace(anchor, anchor + 'iroh-mainline-address-lookup = "0.4"\n', 1)
+    s = s.replace(anchor, anchor + 'iroh-mainline-address-lookup = "0.6"\n', 1)
     open(p, "w").write(s)
     print("  + Cargo.toml dependency")
 PYEOF
@@ -146,7 +146,7 @@ check src/endpoint.rs  "pub fn address_lookup("       "builder method"
 
 echo
 if [[ $fail -ne 0 ]]; then
-    echo "patch incomplete — see failures above" >&2
+    echo "patch incomplete, see the failures above" >&2
     exit 1
 fi
 echo "Patched. Next:"

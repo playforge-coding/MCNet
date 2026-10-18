@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * This is what lets MCNet avoid touching Minecraft's networking stack at all.
  * Rather than intercepting packets, we hand the game an address it already
- * knows how to dial — `127.0.0.1:<ephemeral>` — and move the bytes underneath.
+ * knows how to dial (`127.0.0.1:<ephemeral>`) and move the bytes underneath.
  */
 class ClientTunnel(
     private val addr: EndpointAddr,
@@ -54,7 +54,7 @@ class ClientTunnel(
         // Dialing your own endpoint id can never work, and it is easy to end up
         // doing it by accident. MCNet's identity lives in config/mcnet.json, so
         // any two instances that share *or copied* that file have the same
-        // endpoint id — and duplicating an existing instance is the usual way
+        // endpoint id, and duplicating an existing instance is the usual way
         // people make a second one. Without this check iroh fails much later
         // with something far less obvious.
         if (addr.id().toString() == endpoint.id().toString()) {
@@ -62,7 +62,7 @@ class ClientTunnel(
                 "This instance already has that identity (${endpoint.id().fmtShort()}), so it " +
                     "would be dialing itself. Two instances share an identity when " +
                     "config/mcnet.json is shared or was copied between them. Fix: delete " +
-                    "config/mcnet.json in one instance and restart it — MCNet will generate a " +
+                    "config/mcnet.json in one instance and restart it. MCNet will generate a " +
                     "fresh identity, and that instance gets a new join code.",
             )
         }
@@ -72,12 +72,13 @@ class ClientTunnel(
 
         // Port 0 lets the OS pick; binding to the loopback interface keeps the
         // proxy off the local network.
-        val socket = withContext(Dispatchers.IO) {
-            ServerSocket().apply {
-                reuseAddress = true
-                bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+        val socket =
+            withContext(Dispatchers.IO) {
+                ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+                }
             }
-        }
         server = socket
         localAddress = socket.localSocketAddress as InetSocketAddress
 
@@ -91,9 +92,9 @@ class ClientTunnel(
     /**
      * Closes the tunnel once nothing has been using it for a while.
      *
-     * Without this, a join that fails *after* the iroh connection is up — a
-     * version mismatch, a whitelist rejection, the player backing out of the
-     * connecting screen — leaves the QUIC connection open forever. The host
+     * Without this, a join that fails *after* the iroh connection is up leaves
+     * the QUIC connection open forever. That covers a version mismatch, a
+     * whitelist rejection, or the player backing out of the connecting screen. The host
      * goes on counting that peer as connected, which is both a leak and a lie
      * in `/mcnet status`.
      *
@@ -115,22 +116,27 @@ class ClientTunnel(
         }
     }
 
-    private suspend fun CoroutineScope.acceptLoop(socket: ServerSocket, connection: Connection) {
+    private suspend fun CoroutineScope.acceptLoop(
+        socket: ServerSocket,
+        connection: Connection,
+    ) {
         while (isActive && !socket.isClosed) {
-            val client = try {
-                withContext(Dispatchers.IO) { socket.accept() }
-            } catch (_: Exception) {
-                break // socket closed by stop()
-            }
+            val client =
+                try {
+                    withContext(Dispatchers.IO) { socket.accept() }
+                } catch (_: Exception) {
+                    break // socket closed by stop()
+                }
             // Child of the accept job, so stop() closes in-flight sessions too.
             launch {
-                val stream = try {
-                    connection.openBi()
-                } catch (e: Exception) {
-                    MCNet.logger.warn("host closed the connection", e)
-                    runCatching { withContext(Dispatchers.IO) { client.close() } }
-                    return@launch
-                }
+                val stream =
+                    try {
+                        connection.openBi()
+                    } catch (e: Exception) {
+                        MCNet.logger.warn("host closed the connection", e)
+                        runCatching { withContext(Dispatchers.IO) { client.close() } }
+                        return@launch
+                    }
                 activeSessions.incrementAndGet()
                 try {
                     bridge(client, stream, this)

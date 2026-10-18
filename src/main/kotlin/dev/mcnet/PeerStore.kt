@@ -14,7 +14,7 @@ import java.nio.file.Path
  *
  * Entries are keyed by endpoint id rather than by ticket. An endpoint id is
  * derived from the host's secret key and never changes, so a saved entry keeps
- * working after the host moves networks — which is exactly the property a
+ * working after the host moves networks. That is exactly the property a
  * server list needs and a ticket cannot provide.
  */
 object PeerStore {
@@ -43,11 +43,12 @@ object PeerStore {
             JsonParser.parseString(Files.readString(file)).asJsonArray.forEach { element ->
                 val o = element.asJsonObject
                 val id = o.get("id")?.asString ?: return@forEach
-                peers += Peer(
-                    id = id,
-                    name = o.get("name")?.asString ?: shorten(id),
-                    lastJoined = o.get("lastJoined")?.asLong ?: 0,
-                )
+                peers +=
+                    Peer(
+                        id = id,
+                        name = o.get("name")?.asString ?: shorten(id),
+                        lastJoined = o.get("lastJoined")?.asLong ?: 0,
+                    )
             }
         }.onFailure { MCNet.logger.warn("could not read {}", file, it) }
     }
@@ -58,7 +59,10 @@ object PeerStore {
      * Called after the tunnel is up rather than when the code is typed, so the
      * list only ever fills with hosts that actually worked.
      */
-    fun remember(id: String, suggestedName: String? = null) {
+    fun remember(
+        id: String,
+        suggestedName: String? = null,
+    ) {
         val existing = peers.firstOrNull { it.id == id }
         if (existing != null) {
             existing.lastJoined = System.currentTimeMillis()
@@ -68,7 +72,10 @@ object PeerStore {
         save()
     }
 
-    fun rename(id: String, name: String) {
+    fun rename(
+        id: String,
+        name: String,
+    ) {
         peers.firstOrNull { it.id == id }?.name = name.ifBlank { shorten(id) }
         save()
     }
@@ -79,17 +86,18 @@ object PeerStore {
     }
 
     fun save() {
-        val array = JsonArray().apply {
-            peers.forEach { peer ->
-                add(
-                    JsonObject().apply {
-                        addProperty("id", peer.id)
-                        addProperty("name", peer.name)
-                        addProperty("lastJoined", peer.lastJoined)
-                    },
-                )
+        val array =
+            JsonArray().apply {
+                peers.forEach { peer ->
+                    add(
+                        JsonObject().apply {
+                            addProperty("id", peer.id)
+                            addProperty("name", peer.name)
+                            addProperty("lastJoined", peer.lastJoined)
+                        },
+                    )
+                }
             }
-        }
         runCatching {
             Files.createDirectories(path.parent)
             Files.writeString(path, gson.toJson(array))
