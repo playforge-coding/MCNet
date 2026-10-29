@@ -140,6 +140,12 @@ class VoiceRelayTest {
                             heard += datagram
                         }
 
+                        override fun video(
+                            speaker: Int,
+                            group: Int,
+                            event: VideoEvent,
+                        ) {}
+
                         override fun roster(entries: List<RosterEntry>) {
                             rosters += entries
                         }

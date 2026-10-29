@@ -6,7 +6,68 @@ on:
   pull_request:
 
 jobs:
+  # The voice addon's native video library (webcam capture plus the AV1
+  # codecs), one build per platform the jar ships for. Rust cross-compiles
+  # fine, but libaom and dav1d are built from source with cmake and meson, so
+  # each platform builds on its own runner.
+  video-natives:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            prefix: darwin-aarch64
+            library: libmcnet_video.dylib
+          - os: ubuntu-24.04
+            prefix: linux-x86-64
+            library: libmcnet_video.so
+          - os: ubuntu-24.04-arm
+            prefix: linux-aarch64
+            library: libmcnet_video.so
+          - os: windows-2025
+            prefix: win32-x86-64
+            library: mcnet_video.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install meson and ninja
+        run: pip install meson ninja
+
+      - name: Install nasm
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      # meson needs cl.exe on the PATH, which only a developer prompt provides.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      # `cargo test` alone builds only the test binaries, not the shared
+      # library the next step uploads, so build that explicitly.
+      - name: Build and test
+        run: |
+          cargo build --release --manifest-path video/Cargo.toml
+          cargo test --release --manifest-path video/Cargo.toml
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: video-native-${{ matrix.prefix }}
+          path: video/target/release/${{ matrix.library }}
+          if-no-files-found: error
+
   build:
+    needs: video-natives
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,10 +87,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: video-native-*
+          path: video-natives
+
+      # Each artifact lands in a folder named after itself; JNA wants the
+      # folders named after the platform.
+      - name: Arrange video natives
+        run: |
+          set -euo pipefail
+          for dir in video-natives/video-native-*; do
+            mv "$dir" "video-natives/${dir#video-natives/video-native-}"
+          done
+          find video-natives -type f
+
       # The tests bind real iroh endpoints on loopback, so they exercise the
       # native library as well as the tunnel logic.
       - name: Build and test
-        run: ./gradlew build
+        run: ./gradlew build -Pmcnet.videoNatives=video-natives
 
       - uses: actions/upload-artifact@v7
         with:

@@ -1,0 +1,49 @@
+[package]
+name = "mcnet-video"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "mcnet_video"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# Generates the Kotlin bindings from the built library. See voice/build.gradle.kts.
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+thiserror = "2.0.21"
+uniffi = { version = "0.32.2", features = ["cli"] }
+yuv = "0.8.19"
+
+[build-dependencies]
+bindgen = "0.73.2"
+cmake = "0.1.58"
+
+[profile.release]
+# Codec glue runs every frame; the C libraries do the heavy lifting, but the
+# color conversion in `yuv` is Rust and wants full optimization.
+lto = "thin"
+codegen-units = 1
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+dispatch2 = "0.3.1"
+objc2 = "0.6.5"
+objc2-av-foundation = { version = "0.3.2", features = ["objc2-core-media", "objc2-core-video", "block2", "dispatch2"] }
+objc2-core-foundation = "0.3.2"
+objc2-core-media = "0.3.2"
+objc2-core-video = "0.3.2"
+objc2-foundation = "0.3.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+v4l = "0.14.0"
+# Pure Rust JPEG decoding, for the many Linux webcams that only offer MJPEG
+# above 480p.
+zune-jpeg = "0.5.15"

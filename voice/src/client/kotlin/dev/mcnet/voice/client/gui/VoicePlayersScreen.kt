@@ -17,8 +17,9 @@ import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
- * Everyone else in the call, each with a mute toggle and a volume slider.
- * Both are local to this client and persist across sessions by player UUID.
+ * Everyone else in the call, each with a mute toggle, a volume slider and a
+ * camera toggle. All three are local to this client and persist across
+ * sessions by player UUID.
  */
 class VoicePlayersScreen(
     private val parent: Screen,
@@ -105,21 +106,37 @@ class VoicePlayersScreen(
                     { Component.translatable("mcnet-voice.players.volume", (it * 100).roundToInt()) },
                 ) { VoiceClientConfig.setVolume(participant.uuid, it) }
 
+            private val cameraButton: Button =
+                Button
+                    .builder(cameraLabel()) {
+                        val hidden = !VoiceClientConfig.isCameraHidden(participant.uuid)
+                        VoiceClientConfig.setCameraHidden(participant.uuid, hidden)
+                        MCNetVoiceClient.session?.refreshWatches()
+                        it.message = cameraLabel()
+                    }.width(CAMERA_WIDTH)
+                    .build()
+
             private fun muteLabel(): Component =
                 Component.translatable(
-                    if (VoiceClientConfig.isMuted(
-                            participant.uuid,
-                        )
-                    ) {
+                    if (VoiceClientConfig.isMuted(participant.uuid)) {
                         "mcnet-voice.players.unmute"
                     } else {
                         "mcnet-voice.players.mute"
                     },
                 )
 
-            override fun children(): List<GuiEventListener> = listOf(volume, muteButton)
+            private fun cameraLabel(): Component =
+                Component.translatable(
+                    if (VoiceClientConfig.isCameraHidden(participant.uuid)) {
+                        "mcnet-voice.players.show_camera"
+                    } else {
+                        "mcnet-voice.players.hide_camera"
+                    },
+                )
 
-            override fun narratables(): List<NarratableEntry> = listOf(volume, muteButton)
+            override fun children(): List<GuiEventListener> = listOf(volume, muteButton, cameraButton)
+
+            override fun narratables(): List<NarratableEntry> = listOf(volume, muteButton, cameraButton)
 
             override fun extractContent(
                 graphics: GuiGraphicsExtractor,
@@ -132,30 +149,40 @@ class VoicePlayersScreen(
                 val textY = contentY + (ROW_HEIGHT - font.lineHeight) / 2 - 1
                 graphics.text(font, participant.name, contentX + 4, textY, WHITE)
 
-                if (MCNetVoiceClient.session?.isSpeaking(participant.uuid) == true) {
+                val state =
+                    when {
+                        MCNetVoiceClient.session?.isSpeaking(participant.uuid) == true -> "mcnet-voice.players.speaking"
+                        participant.camera -> "mcnet-voice.players.on_camera"
+                        else -> null
+                    }
+                if (state != null) {
                     graphics.text(
                         font,
-                        Component.translatable("mcnet-voice.players.speaking"),
+                        Component.translatable(state),
                         contentX + 8 + font.width(participant.name),
                         textY,
                         GREEN,
                     )
                 }
 
-                muteButton.x = contentRight - MUTE_WIDTH
+                cameraButton.x = contentRight - CAMERA_WIDTH
+                cameraButton.y = contentY + 1
+                muteButton.x = cameraButton.x - 4 - MUTE_WIDTH
                 muteButton.y = contentY + 1
                 volume.x = muteButton.x - 4 - SLIDER_WIDTH
                 volume.y = contentY + 1
                 volume.extractRenderState(graphics, mouseX, mouseY, partialTick)
                 muteButton.extractRenderState(graphics, mouseX, mouseY, partialTick)
+                cameraButton.extractRenderState(graphics, mouseX, mouseY, partialTick)
             }
         }
     }
 
     private companion object {
         const val ROW_HEIGHT = 24
-        const val ROW_WIDTH = 340
+        const val ROW_WIDTH = 400
         const val MUTE_WIDTH = 60
+        const val CAMERA_WIDTH = 70
         const val SLIDER_WIDTH = 100
 
         const val WHITE = -1

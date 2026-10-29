@@ -102,6 +102,110 @@ tasks.test {
     testLogging { showStandardStreams = true }
 }
 
+// The native video library: webcam capture plus the AV1 encoder and decoder,
+// a Rust crate under video/ that the voice jar bundles the way the core
+// bundles iroh's natives. Three ways to get it, in order of preference:
+//
+//  1. -Pmcnet.videoNatives=<dir>: prebuilt libraries for every platform, laid
+//     out as <dir>/<jna prefix>/<library>. This is what CI passes after its
+//     per-platform build jobs.
+//  2. cargo on the PATH: build it here, for this machine only. Needs cmake,
+//     meson and ninja; see .mise.toml and the README.
+//  3. Neither: the jar ships without it, voice works, video reports itself
+//     unavailable. -Pmcnet.video=false forces this.
+//
+// The Kotlin bindings are generated from the built library and committed
+// under src/client/generated, so compiling never needs cargo. They carry a
+// checksum of the API they were generated from, and refuse to load a library
+// that does not match, so a stale commit fails loudly rather than oddly.
+val videoCrate = rootProject.layout.projectDirectory.dir("video")
+val hostArch =
+    when (val raw = System.getProperty("os.arch")) {
+        "aarch64", "arm64" -> "aarch64"
+        "amd64", "x86_64" -> "x86-64"
+        else -> raw
+    }
+val hostOs = System.getProperty("os.name").lowercase()
+val (hostJnaPrefix, hostVideoLibrary) =
+    when {
+        hostOs.contains("mac") -> "darwin-$hostArch" to "libmcnet_video.dylib"
+        hostOs.contains("win") -> "win32-$hostArch" to "mcnet_video.dll"
+        else -> "linux-$hostArch" to "libmcnet_video.so"
+    }
+val builtVideoLibrary = videoCrate.file("target/release/$hostVideoLibrary")
+val prebuiltVideoNatives = providers.gradleProperty("mcnet.videoNatives").map { rootProject.file(it) }
+val cargoOnPath =
+    System
+        .getenv("PATH")
+        .orEmpty()
+        .split(File.pathSeparator)
+        .any { File(it, "cargo").canExecute() || File(it, "cargo.exe").canExecute() }
+val buildVideoLocally =
+    !prebuiltVideoNatives.isPresent && cargoOnPath && providers.gradleProperty("mcnet.video").orNull != "false"
+
+val cargoBuild =
+    tasks.register<Exec>("cargoBuild") {
+        description = "Builds the native video library for this machine."
+        enabled = buildVideoLocally
+        workingDir = videoCrate.asFile
+        commandLine("cargo", "build", "--release")
+        outputs.file(builtVideoLibrary)
+        // Always hand over to cargo, which tracks its own inputs, including
+        // the vendored codec submodules moving to a new tag. A no-op build
+        // takes well under a second.
+        outputs.upToDateWhen { false }
+    }
+
+tasks.register<Exec>("generateVideoBindings") {
+    description = "Regenerates the committed Kotlin bindings from the built video library."
+    dependsOn(cargoBuild)
+    workingDir = videoCrate.asFile
+    val outDir = layout.projectDirectory.dir("src/client/generated/kotlin")
+    doFirst { delete(outDir) }
+    commandLine(
+        "cargo",
+        "run",
+        "--release",
+        "--quiet",
+        "--bin",
+        "uniffi-bindgen",
+        "--",
+        "generate",
+        "--library",
+        builtVideoLibrary.asFile.absolutePath,
+        "--language",
+        "kotlin",
+        "--no-format",
+        "--out-dir",
+        outDir.asFile.absolutePath,
+    )
+}
+
+val bundleVideoNatives =
+    tasks.register<Sync>("bundleVideoNatives") {
+        description = "Puts the native video libraries where JNA's classpath lookup finds them."
+        into(layout.buildDirectory.dir("generated/video-natives"))
+        when {
+            prebuiltVideoNatives.isPresent -> {
+                from(prebuiltVideoNatives)
+            }
+
+            buildVideoLocally -> {
+                dependsOn(cargoBuild)
+                from(builtVideoLibrary) { into(hostJnaPrefix) }
+            }
+
+            else -> {
+                doFirst { logger.warn("mcnet-voice: no native video library; the jar will not support cameras") }
+            }
+        }
+    }
+
+sourceSets.named("client") {
+    kotlin.srcDir("src/client/generated/kotlin")
+    resources.srcDir(bundleVideoNatives)
+}
+
 val minecraftVersion = property("minecraft_version") as String
 val loaderVersion = property("loader_version") as String
 
@@ -143,6 +247,9 @@ val ktlintVersion = "1.8.0"
 spotless {
     kotlin {
         target("src/**/*.kt")
+        // Machine-written by UniFFI; formatting it would only make
+        // regeneration noisy.
+        targetExclude("src/client/generated/**")
         ktlint(ktlintVersion)
     }
     kotlinGradle {
