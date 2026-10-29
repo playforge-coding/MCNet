@@ -79,3 +79,7 @@ iroh-*.jar
 # mcnet: decompiled game sources, kept locally for API reference only
 
 decompiled/
+
+# mcnet: the video spike's native build output
+
+video/target/

@@ -17,3 +17,6 @@ rootProject.name = "mcnet"
 // The optional voice chat addon. It builds into its own jar and depends on
 // the core mod at runtime, so players who do not want voice never load it.
 include("voice")
+
+// video/ is not a Gradle project: it is the Rust crate behind the voice
+// addon's cameras, built by the voice build script (see voice/build.gradle.kts).

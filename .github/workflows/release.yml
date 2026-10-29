@@ -16,7 +16,61 @@ permissions:
   contents: write
 
 jobs:
+  # Same matrix as build.yml: the voice jar bundles a native video library
+  # per platform, each built on that platform.
+  video-natives:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            prefix: darwin-aarch64
+            library: libmcnet_video.dylib
+          - os: ubuntu-24.04
+            prefix: linux-x86-64
+            library: libmcnet_video.so
+          - os: ubuntu-24.04-arm
+            prefix: linux-aarch64
+            library: libmcnet_video.so
+          - os: windows-2025
+            prefix: win32-x86-64
+            library: mcnet_video.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install meson and ninja
+        run: pip install meson ninja
+
+      - name: Install nasm
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Build and test
+        run: cargo test --release --manifest-path video/Cargo.toml
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: video-native-${{ matrix.prefix }}
+          path: video/target/release/${{ matrix.library }}
+          if-no-files-found: error
+
   release:
+    needs: video-natives
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,6 +86,19 @@ jobs:
           java-version: 25
 
       - uses: gradle/actions/setup-gradle@v6
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: video-native-*
+          path: video-natives
+
+      - name: Arrange video natives
+        run: |
+          set -euo pipefail
+          for dir in video-natives/video-native-*; do
+            mv "$dir" "video-natives/${dir#video-natives/video-native-}"
+          done
+          find video-natives -type f
 
       # Tag and inputs go through the environment rather than being
       # interpolated straight into the shell, so a tag containing shell
@@ -56,7 +123,7 @@ jobs:
       # `clean` so a stale jar from a previous version can never be published.
       # `build` runs the tests, which bind real iroh endpoints on loopback.
       - name: Build
-        run: ./gradlew clean build -Pmod_version=${{ steps.v.outputs.version }}
+        run: ./gradlew clean build -Pmod_version=${{ steps.v.outputs.version }} -Pmcnet.videoNatives=video-natives
 
       # A release jar that built successfully can still be unusable. Jar-in-Jar
       # is what makes MCNet a single-file install; if it silently did not
@@ -92,6 +159,15 @@ jobs:
           fi
           unzip -p "$VOICE" fabric.mod.json | grep -q "\"version\":\"${VERSION}\"" \
             || { echo "::error::the voice fabric.mod.json was not stamped with ${VERSION}"; exit 1; }
+
+          # Cameras need the native video library for every platform. A
+          # missing one would not fail the build; it would make video
+          # silently unavailable on that platform.
+          for native in darwin-aarch64/libmcnet_video.dylib linux-x86-64/libmcnet_video.so \
+                        linux-aarch64/libmcnet_video.so win32-x86-64/mcnet_video.dll; do
+            unzip -l "$VOICE" | grep -q "$native" \
+              || { echo "::error::$native is missing from the voice jar"; exit 1; }
+          done
 
           echo "$VOICE looks complete ($(du -h "$VOICE" | cut -f1))"
 

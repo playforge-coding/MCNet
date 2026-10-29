@@ -5,6 +5,7 @@ import dev.mcnet.voice.client.VoiceClientConfig
 import dev.mcnet.voice.client.VoiceSession
 import dev.mcnet.voice.client.audio.AudioDevices
 import dev.mcnet.voice.client.audio.Microphone
+import dev.mcnet.voice.client.video.VideoNative
 import net.minecraft.ChatFormatting
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.AbstractWidget
@@ -20,8 +21,9 @@ import net.minecraft.network.chat.Component
 import kotlin.math.roundToInt
 
 /**
- * Every voice setting on one screen, with a live microphone meter under the
- * activation threshold so the player can see what the threshold means.
+ * Every voice and video setting on one screen, with a live microphone meter
+ * under the activation threshold so the player can see what the threshold
+ * means.
  *
  * Opening it outside a session starts a capture-only microphone for the
  * meter; closing it stops that again.
@@ -32,6 +34,7 @@ class VoiceSettingsScreen(
     private val layout = HeaderAndFooterLayout(this)
 
     private lateinit var thresholdSlider: ValueSlider
+    private lateinit var cameraToggle: CycleButton<Boolean>
     private lateinit var status: MultiLineTextWidget
 
     /** Capture-only microphone used when there is no session to borrow one from. */
@@ -109,16 +112,88 @@ class VoiceSettingsScreen(
         row(volume, hud)
 
         val microphone =
-            deviceButton("mcnet-voice.settings.microphone", AudioDevices.inputs(), VoiceClientConfig.microphone) {
+            deviceButton(
+                "mcnet-voice.settings.microphone",
+                AudioDevices.inputs().map { it to AudioDevices.displayName(it) },
+                VoiceClientConfig.microphone,
+            ) {
                 VoiceClientConfig.microphone = it
                 onDevicesChanged()
             }
         val speaker =
-            deviceButton("mcnet-voice.settings.speaker", AudioDevices.outputs(), VoiceClientConfig.speaker) {
+            deviceButton(
+                "mcnet-voice.settings.speaker",
+                AudioDevices.outputs().map { it to AudioDevices.displayName(it) },
+                VoiceClientConfig.speaker,
+            ) {
                 VoiceClientConfig.speaker = it
                 onDevicesChanged()
             }
         row(microphone, speaker)
+
+        // Camera. The on/off switch is for this session only; it never
+        // persists, so nobody's camera comes on by surprise.
+        val session = MCNetVoiceClient.session
+        cameraToggle =
+            CycleButton
+                .onOffBuilder(session?.camera != null)
+                .create(Component.translatable("mcnet-voice.settings.camera")) { _, value ->
+                    MCNetVoiceClient.session?.setCamera(value)
+                }
+        cameraToggle.width = HALF_WIDTH
+        cameraToggle.active = VideoNative.available && session?.state == VoiceSession.State.LIVE
+        if (!VideoNative.available) {
+            cameraToggle.setTooltip(
+                Tooltip.create(
+                    Component.translatable(
+                        "mcnet-voice.settings.camera.unavailable",
+                        VideoNative.unavailableReason ?: "",
+                    ),
+                ),
+            )
+        }
+
+        val cameraDevice =
+            deviceButton(
+                "mcnet-voice.settings.camera_device",
+                VideoNative.cameras().map { it.id to it.name },
+                VoiceClientConfig.camera,
+            ) {
+                VoiceClientConfig.camera = it
+                MCNetVoiceClient.session?.restartCamera()
+            }
+        cameraDevice.active = VideoNative.available
+        row(cameraToggle, cameraDevice)
+
+        val quality =
+            CycleButton
+                .builder<VoiceClientConfig.CameraQuality>({ qualityLabel(it) }, VoiceClientConfig.cameraQuality)
+                .withValues(VoiceClientConfig.CameraQuality.entries)
+                .create(Component.translatable("mcnet-voice.settings.camera_quality")) { _, value ->
+                    VoiceClientConfig.cameraQuality = value
+                    MCNetVoiceClient.session?.restartCamera()
+                }
+        quality.width = HALF_WIDTH
+
+        val showCameras =
+            CycleButton
+                .onOffBuilder(VoiceClientConfig.showCameras)
+                .create(Component.translatable("mcnet-voice.settings.show_cameras")) { _, value ->
+                    VoiceClientConfig.showCameras = value
+                    MCNetVoiceClient.session?.refreshWatches()
+                }
+        showCameras.width = HALF_WIDTH
+        row(quality, showCameras)
+
+        val tileWidth =
+            ValueSlider(
+                FULL_WIDTH,
+                VoiceClientConfig.MIN_TILE_WIDTH.toDouble(),
+                VoiceClientConfig.MAX_TILE_WIDTH.toDouble(),
+                VoiceClientConfig.cameraTileWidth.toDouble(),
+                { Component.translatable("mcnet-voice.settings.camera_size", it.roundToInt()) },
+            ) { VoiceClientConfig.cameraTileWidth = it.roundToInt() }
+        contents.addChild(tileWidth)
 
         status = contents.addChild(MultiLineTextWidget(Component.empty(), font).setMaxWidth(FULL_WIDTH))
 
@@ -138,30 +213,33 @@ class VoiceSettingsScreen(
         ensureMonitor()
     }
 
+    /**
+     * A cycle button over devices given as (id, display name). The saved
+     * device may be unplugged right now; it stays selectable so the setting
+     * is not silently lost.
+     */
     private fun deviceButton(
         key: String,
-        devices: List<String>,
+        devices: List<Pair<String, String>>,
         current: String,
         onChange: (String) -> Unit,
     ): CycleButton<String> {
-        // The saved device may be unplugged right now; keep it selectable so
-        // the setting is not silently lost.
-        val values = (listOf("") + devices + listOf(current)).distinct()
+        val names = devices.toMap()
+        val values = (listOf("") + devices.map { it.first } + listOf(current)).distinct()
         val button =
             CycleButton
-                .builder<String>({ deviceLabel(it) }, current)
+                .builder<String>({ id ->
+                    if (id.isEmpty()) {
+                        Component.translatable("mcnet-voice.settings.device.default")
+                    } else {
+                        Component.literal(names[id] ?: id)
+                    }
+                }, current)
                 .withValues(values)
                 .create(Component.translatable(key, "")) { _, value -> onChange(value) }
         button.width = HALF_WIDTH
         return button
     }
-
-    private fun deviceLabel(device: String): Component =
-        if (device.isEmpty()) {
-            Component.translatable("mcnet-voice.settings.device.default")
-        } else {
-            Component.literal(AudioDevices.displayName(device))
-        }
 
     private fun activationLabel(activation: VoiceClientConfig.Activation): Component =
         when (activation) {
@@ -176,25 +254,51 @@ class VoiceSettingsScreen(
             }
         }
 
+    private fun qualityLabel(quality: VoiceClientConfig.CameraQuality): Component =
+        Component.translatable("mcnet-voice.settings.camera_quality.value", quality.height, quality.kbps)
+
     override fun repositionElements() {
         layout.arrangeElements()
     }
 
     override fun tick() {
         refreshStatus()
+        val session = MCNetVoiceClient.session
+        cameraToggle.active = VideoNative.available && session?.state == VoiceSession.State.LIVE
+        // The key binding can flip the camera while this screen is open.
+        val on = session?.camera != null
+        if (cameraToggle.value != on) cameraToggle.value = on
     }
 
     private fun refreshStatus() {
         val session = MCNetVoiceClient.session
         val micError = currentMicrophone()?.error
+        val cameraError = session?.cameraError
+        val camera = session?.camera
         status.message =
             when {
                 micError != null -> {
                     Component.translatable("mcnet-voice.settings.status.error", micError).withStyle(ChatFormatting.RED)
                 }
 
+                cameraError != null -> {
+                    Component
+                        .translatable("mcnet-voice.settings.status.camera_error", cameraError)
+                        .withStyle(ChatFormatting.RED)
+                }
+
                 session == null -> {
                     Component.translatable("mcnet-voice.settings.status.idle").withStyle(ChatFormatting.GRAY)
+                }
+
+                session.state == VoiceSession.State.LIVE && camera != null && camera.description.isNotEmpty() -> {
+                    Component
+                        .translatable(
+                            "mcnet-voice.settings.status.camera_live",
+                            session.others.size,
+                            camera.description,
+                            camera.kbps,
+                        ).withStyle(ChatFormatting.GREEN)
                 }
 
                 session.state == VoiceSession.State.LIVE -> {

@@ -9,6 +9,7 @@ import dev.mcnet.voice.VoiceLog
 import dev.mcnet.voice.VoicePayloads
 import dev.mcnet.voice.VoiceServer
 import dev.mcnet.voice.client.gui.VoiceSettingsScreen
+import dev.mcnet.voice.client.video.VideoNative
 import kotlinx.coroutines.launch
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
@@ -27,7 +28,7 @@ import net.minecraft.resources.Identifier
 
 /**
  * Client-side glue: reacts to the server's voice offer, owns the current
- * [VoiceSession], and wires up keys, HUD and the settings button.
+ * [VoiceSession], and wires up keys, HUDs and the settings button.
  */
 object MCNetVoiceClient : ClientModInitializer {
     /** The call this client is in, if any. Read from the render and audio threads. */
@@ -43,6 +44,7 @@ object MCNetVoiceClient : ClientModInitializer {
 
     private lateinit var pushToTalk: KeyMapping
     private lateinit var toggleMute: KeyMapping
+    private lateinit var toggleCamera: KeyMapping
     private lateinit var openSettings: KeyMapping
 
     override fun onInitializeClient() {
@@ -56,6 +58,12 @@ object MCNetVoiceClient : ClientModInitializer {
         toggleMute =
             KeyMappingHelper.registerKeyMapping(
                 KeyMapping("key.mcnet-voice.toggle_mute", InputConstants.KEY_M, category),
+            )
+        // Unbound on purpose: a camera should never come on from a key
+        // pressed by accident.
+        toggleCamera =
+            KeyMappingHelper.registerKeyMapping(
+                KeyMapping("key.mcnet-voice.toggle_camera", InputConstants.UNKNOWN.value, category),
             )
         openSettings =
             KeyMappingHelper.registerKeyMapping(
@@ -72,12 +80,16 @@ object MCNetVoiceClient : ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register { tick() }
 
         VoiceHud.register()
+        VideoHud.register()
 
         ScreenEvents.AFTER_INIT.register { _, screen, _, _ ->
             if (screen is PauseScreen && screen.showsPauseMenu()) addSettingsButton(screen)
         }
 
-        VoiceLog.logger.info("MCNet Voice client ready")
+        VoiceLog.logger.info(
+            "MCNet Voice client ready; video {}",
+            if (VideoNative.available) "available" else "unavailable (${VideoNative.unavailableReason})",
+        )
     }
 
     /** Runs on the render thread. */
@@ -143,6 +155,9 @@ object MCNetVoiceClient : ClientModInitializer {
         while (toggleMute.consumeClick()) {
             VoiceClientConfig.micMuted = !VoiceClientConfig.micMuted
             VoiceClientConfig.save()
+        }
+        while (toggleCamera.consumeClick()) {
+            session?.let { it.setCamera(it.camera == null) }
         }
         while (openSettings.consumeClick()) {
             val minecraft = Minecraft.getInstance()

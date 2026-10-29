@@ -1,0 +1,8 @@
+[submodule "video/native/vendor/aom"]
+	path = video/vendor/aom
+	url = https://aomedia.googlesource.com/aom
+	shallow = true
+[submodule "video/native/vendor/dav1d"]
+	path = video/vendor/dav1d
+	url = https://code.videolan.org/videolan/dav1d.git
+	shallow = true

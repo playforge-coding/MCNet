@@ -3,7 +3,7 @@
 	"id": "mcnet-voice",
 	"version": "${version}",
 	"name": "MCNet Voice",
-	"description": "Voice chat for MCNet worlds, carried over the same peer-to-peer connection as the game.",
+	"description": "Voice chat and webcams for MCNet worlds, carried over the same peer-to-peer connection as the game.",
 	"authors": [
 		"playforge-coding"
 	],
@@ -32,6 +32,6 @@
 		"java": ">=25",
 		"fabric-api": "*",
 		"fabric-language-kotlin": ">=1.14.2",
-		"mcnet": ">=1.2.0"
+		"mcnet": ">=1.3.0"
 	}
 }

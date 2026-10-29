@@ -12,11 +12,14 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Player-side voice settings, in `config/mcnet-voice.json`.
+ * Player-side voice and video settings, in `config/mcnet-voice.json`.
  *
- * Every field is read from the audio threads as well as the render thread,
+ * Every field is read from the media threads as well as the render thread,
  * hence the volatiles and concurrent maps. Writes come from the settings
- * screen only.
+ * screens only.
+ *
+ * Whether the camera is on is deliberately not here: a camera never comes
+ * on by itself when a session starts.
  */
 object VoiceClientConfig {
     enum class Activation {
@@ -27,6 +30,23 @@ object VoiceClientConfig {
         companion object {
             fun parse(raw: String?): Activation =
                 entries.firstOrNull { it.name.equals(raw?.trim(), ignoreCase = true) } ?: PUSH_TO_TALK
+        }
+    }
+
+    /** Capture height and encoder target. The width follows the camera's aspect ratio. */
+    enum class CameraQuality(
+        val height: Int,
+        val kbps: Int,
+    ) {
+        LOW(240, 200),
+        MEDIUM(360, 400),
+        HIGH(480, 700),
+        FULL(720, 1500),
+        ;
+
+        companion object {
+            fun parse(raw: String?): CameraQuality =
+                entries.firstOrNull { it.name.equals(raw?.trim(), ignoreCase = true) } ?: MEDIUM
         }
     }
 
@@ -55,7 +75,19 @@ object VoiceClientConfig {
 
     @Volatile var hud: Boolean = true
 
+    /** The camera's id as the OS reports it. Empty means the first one found. */
+    @Volatile var camera: String = ""
+
+    @Volatile var cameraQuality: CameraQuality = CameraQuality.MEDIUM
+
+    /** Whether other players' cameras are shown (and fetched) at all. */
+    @Volatile var showCameras: Boolean = true
+
+    /** Width of each camera tile on the HUD, in GUI pixels. */
+    @Volatile var cameraTileWidth: Int = 128
+
     private val mutedPlayers: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
+    private val hiddenCameras: MutableSet<UUID> = ConcurrentHashMap.newKeySet()
     private val playerVolumes = ConcurrentHashMap<UUID, Double>()
 
     fun isMuted(uuid: UUID): Boolean = uuid in mutedPlayers
@@ -65,6 +97,16 @@ object VoiceClientConfig {
         muted: Boolean,
     ) {
         if (muted) mutedPlayers += uuid else mutedPlayers -= uuid
+        save()
+    }
+
+    fun isCameraHidden(uuid: UUID): Boolean = uuid in hiddenCameras
+
+    fun setCameraHidden(
+        uuid: UUID,
+        hidden: Boolean,
+    ) {
+        if (hidden) hiddenCameras += uuid else hiddenCameras -= uuid
         save()
     }
 
@@ -95,9 +137,17 @@ object VoiceClientConfig {
             volume = root.get("volume")?.asDouble ?: 1.0
             micMuted = root.get("micMuted")?.asBoolean ?: false
             hud = root.get("hud")?.asBoolean ?: true
+            camera = root.get("camera")?.asString ?: ""
+            cameraQuality = CameraQuality.parse(root.get("cameraQuality")?.asString)
+            showCameras = root.get("showCameras")?.asBoolean ?: true
+            cameraTileWidth = (root.get("cameraTileWidth")?.asInt ?: 128).coerceIn(MIN_TILE_WIDTH, MAX_TILE_WIDTH)
             mutedPlayers.clear()
             root.getAsJsonArray("mutedPlayers")?.forEach { element ->
                 runCatching { UUID.fromString(element.asString) }.onSuccess { mutedPlayers += it }
+            }
+            hiddenCameras.clear()
+            root.getAsJsonArray("hiddenCameras")?.forEach { element ->
+                runCatching { UUID.fromString(element.asString) }.onSuccess { hiddenCameras += it }
             }
             playerVolumes.clear()
             root.getAsJsonObject("playerVolumes")?.entrySet()?.forEach { (key, value) ->
@@ -120,7 +170,12 @@ object VoiceClientConfig {
                 addProperty("volume", volume)
                 addProperty("micMuted", micMuted)
                 addProperty("hud", hud)
+                addProperty("camera", camera)
+                addProperty("cameraQuality", cameraQuality.name.lowercase())
+                addProperty("showCameras", showCameras)
+                addProperty("cameraTileWidth", cameraTileWidth)
                 add("mutedPlayers", JsonArray().apply { mutedPlayers.forEach { add(it.toString()) } })
+                add("hiddenCameras", JsonArray().apply { hiddenCameras.forEach { add(it.toString()) } })
                 add(
                     "playerVolumes",
                     JsonObject().apply {
@@ -137,4 +192,7 @@ object VoiceClientConfig {
             VoiceLog.logger.warn("could not write {}", path, it)
         }
     }
+
+    const val MIN_TILE_WIDTH = 64
+    const val MAX_TILE_WIDTH = 320
 }
