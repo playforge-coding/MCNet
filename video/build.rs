@@ -55,8 +55,9 @@ fn main() {
                 prefix.join("lib").display()
             );
         }
-        link_static("aom");
-        link_static("dav1d");
+        // CMake names libaom the platform's way (aom.lib with MSVC).
+        println!("cargo:rustc-link-lib=static=aom");
+        link_meson_static("dav1d");
         if env::var("CARGO_CFG_TARGET_OS").unwrap() == "linux" {
             println!("cargo:rustc-link-lib=m");
         }
@@ -119,7 +120,9 @@ fn build_dav1d(out: &Path) -> PathBuf {
     let build = out.join("dav1d-build");
     let prefix = out.join("dav1d");
     if !build.join("build.ninja").exists() {
-        let source = Path::new("vendor/dav1d").canonicalize().unwrap();
+        // Absolute, but not canonicalized: on Windows that yields a \\?\
+        // path, under which meson cannot find dav1d's include directory.
+        let source = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("vendor/dav1d");
         meson(&[
             "setup".as_ref(),
             build.as_os_str(),
@@ -152,7 +155,7 @@ fn meson(args: &[&std::ffi::OsStr]) {
 
 /// Meson names a static library `libfoo.a` even with MSVC, where rustc
 /// would otherwise look for `foo.lib`.
-fn link_static(name: &str) {
+fn link_meson_static(name: &str) {
     if env::var("CARGO_CFG_TARGET_ENV").unwrap() == "msvc" {
         println!("cargo:rustc-link-lib=static:+verbatim=lib{name}.a");
     } else {
