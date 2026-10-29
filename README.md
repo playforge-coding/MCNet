@@ -506,8 +506,8 @@ They need hardware, so those layers are kept thin.
 - **Camera capture on Windows and Linux has not been run on hardware.** The
   Media Foundation and V4L2 backends compile against the real platform crates
   and follow the documented APIs, but only the macOS backend has been used
-  with a camera, and only with OBS Virtual Camera so far. Decoding and
-  watching work everywhere the library builds.
+  with cameras so far (a Mac's built-in camera and OBS Virtual Camera).
+  Decoding and watching work everywhere the library builds.
 - Cameras are shown as HUD tiles only. Drawing them above players' heads in
   the world, and using distance to decide which cameras to fetch, are the
   natural next steps and the relay already supports subscribing per camera.
