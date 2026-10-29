@@ -441,6 +441,13 @@ someone hosts, so it is worth catching before it reaches a download button.
 `workflow_dispatch` runs the same build without a release, leaving the jar as a
 workflow artifact.
 
+Both workflows cache the native video libraries, keyed on the git tree of
+`video/` (which pins the aom and dav1d submodule commits) and the rustc
+version. Releasing a commit that already built on main reuses those libraries
+instead of rebuilding them, which skips the slowest part of the run. Caches
+saved by pull requests are visible only to that pull request, so a release
+never picks up a library built from a fork.
+
 ### Tests
 
 The tests cover what cannot be verified by reading source.

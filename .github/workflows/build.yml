@@ -29,33 +29,60 @@ jobs:
             library: mcnet_video.dll
     runs-on: ${{ matrix.os }}
     steps:
+      # Submodules are fetched only when the library has to be built, since
+      # aom alone is a large checkout.
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: dtolnay/rust-toolchain@stable
+        id: rust
+
+      # The tree hash of video/ covers the crate's sources, Cargo.lock and the
+      # commits the aom and dav1d submodules are pinned to. Together with the
+      # rustc version it identifies the library exactly. Bump the leading v1
+      # if the build steps below change in a way that affects the output.
+      - name: Compute the native cache key
+        id: key
+        shell: bash
+        run: echo "tree=$(git rev-parse HEAD:video)" >> "$GITHUB_OUTPUT"
+
+      # release.yml uses the same key, so a release of a commit that already
+      # built on main reuses its libraries. Caches saved by pull requests are
+      # visible only to that pull request, so a fork cannot plant one here.
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: video/target/release/${{ matrix.library }}
+          key: video-native-v1-${{ matrix.prefix }}-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-${{ steps.key.outputs.tree }}
+
+      - name: Fetch submodules
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: git submodule update --init --depth 1
 
       - uses: actions/setup-python@v6
+        if: steps.cache.outputs.cache-hit != 'true'
         with:
           python-version: "3.13"
 
       - name: Install meson and ninja
+        if: steps.cache.outputs.cache-hit != 'true'
         run: pip install meson ninja
 
       - name: Install nasm
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y nasm
 
       - uses: ilammy/setup-nasm@v1
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
 
       # meson needs cl.exe on the PATH, which only a developer prompt provides.
       - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
 
       # `cargo test` alone builds only the test binaries, not the shared
-      # library the next step uploads, so build that explicitly.
+      # library the next step uploads, so build that explicitly. A cached
+      # library already passed these tests in the run that saved it.
       - name: Build and test
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           cargo build --release --manifest-path video/Cargo.toml
           cargo test --release --manifest-path video/Cargo.toml
