@@ -1,5 +1,4 @@
 # MCNet targets Minecraft 26.3, which requires JDK 25.
-# The iroh-ffi Kotlin build under dht/ needs JDK 21 instead. See dht/README.md.
 #
 # cmake, meson and ninja build libaom and dav1d from the submodules under
 # video/vendor/ for the voice addon's cameras. nasm is also needed on x86_64,

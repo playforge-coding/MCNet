@@ -33,8 +33,9 @@ object MCNetConfig {
 
         /**
          * pkarr records on the BitTorrent Mainline DHT, with no dependency on
-         * n0's infrastructure. Requires bindings built from `dht/apply.sh`; MCNet
-         * logs a warning and falls back to [N0] if they are not present.
+         * n0's infrastructure. Requires the patched bindings `dht/build.sh`
+         * produces, which release builds include; MCNet logs a warning and
+         * falls back to [N0] if they are not present.
          */
         DHT,
         ;

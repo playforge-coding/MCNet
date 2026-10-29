@@ -1,5 +1,5 @@
-// Add to a fork of n0-computer/iroh-ffi as `src/address_lookup.rs`.
-// See ../README.md in this directory for the full procedure.
+// Copied into a clone of n0-computer/iroh-ffi as `src/address_lookup.rs` by
+// apply.sh, which build.sh runs. See README.md in this directory.
 
 use std::sync::{Arc, Mutex};
 

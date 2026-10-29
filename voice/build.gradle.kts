@@ -70,11 +70,10 @@ dependencies {
     "clientImplementation"(coreSourceSets["client"].output)
 
     // Compile-time and dev-run access to the iroh bindings the core bundles.
-    // Same local-jar override as the core, so DHT builds work here too.
-    val localIroh = providers.gradleProperty("mcnet.irohJar").orNull
-    if (localIroh != null) {
-        implementation(files(localIroh))
-    } else {
+    // Patched bindings are compiled into the core, so they and their natives
+    // already arrive with its source set output above; only the published
+    // jar has to be added here.
+    if (rootProject.extra["patchedIroh"] != true) {
         implementation("computer.iroh:iroh:${property("iroh_version")}") { isTransitive = false }
     }
     implementation("net.java.dev.jna:jna:${property("jna_version")}")

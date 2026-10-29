@@ -13,10 +13,11 @@ import kotlin.test.assertTrue
  * The assertions deliberately branch on [MainlineDht.isAvailable] so this test
  * is meaningful under both builds:
  *
- *  - against the published `computer.iroh:iroh`, it proves MCNet degrades
- *    gracefully instead of crashing when `addressLookup=dht` is configured;
- *  - against bindings built from `dht/apply.sh` (run the suite with
- *    `-Pmcnet.irohJar=...`), it proves the reflective hookup matches the
+ *  - against the published `computer.iroh:iroh` (a build without cargo, or
+ *    `-Pmcnet.dht=false`), it proves MCNet degrades gracefully instead of
+ *    crashing when `addressLookup=dht` is configured;
+ *  - against the patched bindings `dht/build.sh` produces (the default with
+ *    cargo, and always in CI), it proves the reflective hookup matches the
  *    generated signatures and that an endpoint really binds with a Mainline
  *    DHT address lookup attached.
  */

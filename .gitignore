@@ -66,15 +66,10 @@ replay_*.log
 *.hprof
 *.jfr
 
-# mcnet: locally built iroh bindings
-#
-# dht/apply.sh patches a checkout of iroh-ffi, and the jar it produces gets
-# passed to the build with -Pmcnet.irohJar. Neither belongs in the repo. The
-# patch itself (dht/*.rs, dht/apply.sh) does, and is not matched here.
+# mcnet: cargo output from dht/build.sh, which patches and builds iroh-ffi.
+# The clone itself lives in a temporary directory and is deleted afterwards.
 
-dht/iroh-ffi/
-iroh-*.jar
-/libs/
+dht/target/
 
 # mcnet: decompiled game sources, kept locally for API reference only
 

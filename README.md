@@ -11,7 +11,7 @@ Written in Kotlin end to end, using Fabric's `kotlin` language adapter.
 | Minecraft | 26.3 |
 | Fabric Loader | 0.19.5 |
 | Fabric API | 0.163.0 |
-| iroh | `computer.iroh:iroh:1.1.0` |
+| iroh | iroh-ffi 1.1.0, patched at build time for the Mainline DHT (see [`dht/`](dht/)) |
 | fabric-language-kotlin | 1.14.2 (Kotlin 2.4.21) |
 | opus4j (voice addon only) | `de.maxhenkel.opus4j:opus4j:2.1.3` |
 | libaom and dav1d (voice addon only) | v3.15.2 and 1.5.4, vendored as submodules under `video/vendor/` |
@@ -87,20 +87,22 @@ backends:
 
 | `addressLookup` | Resolver | Needs |
 |---|---|---|
-| `n0` (default) | n0's DNS servers | nothing, it ships with the published bindings |
-| `dht` | pkarr records on the BitTorrent Mainline DHT | bindings built from [`dht/`](dht/) |
+| `n0` (default) | n0's DNS servers | nothing |
+| `dht` | pkarr records on the BitTorrent Mainline DHT | the patched bindings from [`dht/`](dht/), which release jars include |
 
 The DHT removes the dependency on n0's infrastructure. Records are signed by the
 endpoint's own key, so no one can forge an address for a key they do not hold.
 
-`DhtAddressLookup` is reached reflectively, so a single MCNet build runs against
-either jar. Setting `addressLookup=dht` without DHT-capable bindings logs a
-warning and falls back to `n0` rather than failing to start.
+The published iroh bindings cannot reach the DHT, so the build patches them.
+[`dht/build.sh`](dht/build.sh) clones upstream iroh-ffi into a temporary
+directory, applies a patch of about 80 lines, builds the native library and
+generates the Kotlin bindings, which are then compiled into the mod. There is
+no fork. See [dht/README.md](dht/README.md) for the details.
 
-See [dht/README.md](dht/README.md) for the iroh-ffi patch (about 80 lines), an
-idempotent `apply.sh` that applies it, and the build procedure. Upstream's
-release workflow already cross-builds every native, so a fork inherits the whole
-pipeline.
+`DhtAddressLookup` is reached reflectively, so the same source also builds
+against the published bindings, which is what happens without cargo. Setting
+`addressLookup=dht` on such a jar logs a warning and falls back to `n0` rather
+than failing to start.
 
 ## Voice chat and cameras, the optional addon
 
@@ -335,9 +337,19 @@ game, for addons that want to gate on it.
 The core jar lands in `build/libs/` and the addon in `voice/build/libs/`.
 Gradle provisions the JDK 25 toolchain automatically.
 
-The addon's native video library is built from [`video/`](video/) when
-`cargo` is on the PATH, for the machine doing the building. That needs the
-codec submodules and the tools pinned in `.mise.toml`, plus nasm on x86_64:
+When `cargo` is on the PATH, the core build runs
+[`dht/build.sh`](dht/build.sh) to clone, patch and build iroh-ffi with DHT
+support. That needs git and bash too, and the first run takes several minutes.
+The resulting jar only carries iroh's native library for the machine that
+built it, so it runs nowhere else. Without cargo, or with `-Pmcnet.dht=false`,
+the core uses the published iroh bindings instead: natives for every platform,
+but no DHT. CI builds the patched library on every platform and passes the set
+in with `-Pmcnet.iroh=<dir>`.
+
+The addon's native video library is built from [`video/`](video/) the same
+way, when `cargo` is on the PATH, for the machine doing the building. That
+needs the codec submodules and the tools pinned in `.mise.toml`, plus nasm on
+x86_64:
 
 ```sh
 git submodule update --init
@@ -408,19 +420,20 @@ distribution, and CI runs `gradle/actions/wrapper-validation` against the
 checksums Gradle publishes for official releases. The committed jar matches
 Gradle 9.8.1 (SHA-256 `3b8a2577` through `8e98`).
 
-The built jar bundles the iroh bindings and their native library (about 29 MB)
-via Jar-in-Jar, so users install a single file. The voice jar nests opus4j the
-same way (about 1.5 MB with natives for six platforms) and deliberately does
-not nest iroh or JNA again, since Fabric loads every mod on one classpath and
-the core already provides them.
+The built jar carries the iroh bindings and their native libraries (about
+29 MB), so users install a single file. Patched bindings are compiled straight
+into it; the published ones, when used, are nested via Jar-in-Jar, as is JNA.
+The voice jar nests opus4j the same way (about 1.5 MB with natives for six
+platforms) and deliberately does not carry iroh or JNA again, since Fabric
+loads every mod on one classpath and the core already provides them.
 
 ### Releasing
 
 Publish a GitHub release tagged `v1.2.3` and
 [`.github/workflows/release.yml`](.github/workflows/release.yml) builds the
-native video library on macOS, Linux (x86_64 and aarch64) and Windows
-runners, then builds both mods with those libraries bundled and attaches the
-jars to it. The tag drives the version: `v1.2.3` is
+patched iroh library and the native video library on macOS, Linux (x86_64 and
+aarch64) and Windows runners, then builds both mods with those libraries
+bundled and attaches the jars to it. The tag drives the version: `v1.2.3` is
 stamped into both `fabric.mod.json` files via `-Pmod_version`, so the release
 and the mod metadata cannot disagree. The core and the addon are versioned
 together; the addon declares the core version it was built against.
@@ -433,16 +446,18 @@ download the newest release:
 - https://github.com/playforge-coding/MCNet/releases/latest/download/mcnet-voice.jar
 
 Before publishing, the workflow checks that each jar is actually usable: the
-iroh bindings and JNA must be nested inside the core, opus4j and all four
-video libraries inside the addon, and the version must be stamped. A Jar-in-Jar failure still produces a jar
-that builds fine and then dies with `NoClassDefFoundError` the first time
-someone hosts, so it is worth catching before it reaches a download button.
+DHT-capable iroh bindings with all four iroh libraries, plus JNA, must be inside
+the core, opus4j and all four video libraries inside the addon, and the version
+must be stamped. A Jar-in-Jar failure still produces a jar that builds fine and
+then dies with `NoClassDefFoundError` the first time someone hosts, so it is
+worth catching before it reaches a download button.
 
 `workflow_dispatch` runs the same build without a release, leaving the jar as a
 workflow artifact.
 
-Both workflows cache the native video libraries, keyed on the git tree of
-`video/` (which pins the aom and dav1d submodule commits) and the rustc
+Both workflows cache the native libraries. The video ones are keyed on the git
+tree of `video/` (which pins the aom and dav1d submodule commits) and the rustc
+version; the iroh ones on `iroh_version`, the git tree of `dht/` and the rustc
 version. Releasing a commit that already built on main reuses those libraries
 instead of rebuilding them, which skips the slowest part of the run. Caches
 saved by pull requests are visible only to that pull request, so a release
@@ -469,9 +484,9 @@ read a connection's ALPN *without* consuming the handshake (so probes can be
 routed away from the player path), and a real join must never be mistaken for
 a probe.
 
-`MainlineDhtTest` guards the DHT hookup from both sides: graceful fallback on
-the published bindings, and a real endpoint bind on patched ones
-(`-Pmcnet.irohJar=/path/to/iroh-dht.jar`).
+`MainlineDhtTest` guards the DHT hookup from both sides: a real endpoint bind
+on the patched bindings, and graceful fallback on the published ones
+(`-Pmcnet.dht=false`).
 
 `ProtocolsTest` covers the addon registry: lookup by ALPN content rather than
 array identity, and refusal of reserved or duplicate ALPNs.
@@ -508,11 +523,6 @@ They need hardware, so those layers are kept thin.
 
 ## Known limitations
 
-- **No macOS x86_64 native.** Upstream `computer.iroh:iroh:1.1.0` ships
-  natives for `win32-x86-64`, `linux-x86-64`, `linux-aarch64` and
-  `darwin-aarch64` only, so Intel Macs cannot host or join. This is fixable if
-  you are already building forked bindings: `WITH_MACOS_X64=1 dht/apply.sh`
-  adds the target.
 - **JNA comes from Minecraft.** The game already ships JNA via
   `com.github.oshi:oshi-core`. MCNet pins and bundles the same version (5.17.0)
   as a fallback so the two copies cannot skew. This is why JNA is deliberately

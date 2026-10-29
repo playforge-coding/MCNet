@@ -93,8 +93,73 @@ jobs:
           path: video/target/release/${{ matrix.library }}
           if-no-files-found: error
 
+  # Same matrix as build.yml: iroh's native library with the DHT patch
+  # applied, built per platform by dht/build.sh.
+  iroh-natives:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            prefix: darwin-aarch64
+            library: libiroh_ffi.dylib
+          - os: ubuntu-24.04
+            prefix: linux-x86-64
+            library: libiroh_ffi.so
+          - os: ubuntu-24.04-arm
+            prefix: linux-aarch64
+            library: libiroh_ffi.so
+          - os: windows-2025
+            prefix: win32-x86-64
+            library: iroh_ffi.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        id: rust
+
+      # The iroh version picks the upstream tag and the tree hash of dht/
+      # covers the patch. With the rustc version they identify the library
+      # and bindings exactly. Bump the leading v1 if dht/build.sh changes in
+      # a way its tree hash would not show.
+      - name: Compute the native cache key
+        id: key
+        shell: bash
+        run: |
+          echo "iroh=$(grep '^iroh_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD:dht)" >> "$GITHUB_OUTPUT"
+
+      # Same key as build.yml, so releasing a commit that already built
+      # on main skips straight to the upload.
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: iroh-out
+          key: iroh-native-v1-${{ matrix.prefix }}-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-${{ steps.key.outputs.iroh }}-${{ steps.key.outputs.tree }}
+
+      - name: Patch and build iroh-ffi
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: dht/build.sh iroh-out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: iroh-native-${{ matrix.prefix }}
+          path: iroh-out/natives/${{ matrix.prefix }}/${{ matrix.library }}
+          if-no-files-found: error
+
+      # The bindings come out the same on every platform, so one copy is
+      # enough.
+      - uses: actions/upload-artifact@v7
+        if: matrix.prefix == 'linux-x86-64'
+        with:
+          name: iroh-bindings
+          path: iroh-out/kotlin
+          if-no-files-found: error
+
   release:
-    needs: video-natives
+    needs: [video-natives, iroh-natives]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -116,13 +181,26 @@ jobs:
           pattern: video-native-*
           path: video-natives
 
-      - name: Arrange video natives
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: iroh-native-*
+          path: iroh/natives
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: iroh-bindings
+          path: iroh/kotlin
+
+      - name: Arrange natives
         run: |
           set -euo pipefail
           for dir in video-natives/video-native-*; do
             mv "$dir" "video-natives/${dir#video-natives/video-native-}"
           done
-          find video-natives -type f
+          for dir in iroh/natives/iroh-native-*; do
+            mv "$dir" "iroh/natives/${dir#iroh/natives/iroh-native-}"
+          done
+          find video-natives iroh -type f
 
       # Tag and inputs go through the environment rather than being
       # interpolated straight into the shell, so a tag containing shell
@@ -147,7 +225,7 @@ jobs:
       # `clean` so a stale jar from a previous version can never be published.
       # `build` runs the tests, which bind real iroh endpoints on loopback.
       - name: Build
-        run: ./gradlew clean build -Pmod_version=${{ steps.v.outputs.version }} -Pmcnet.videoNatives=video-natives
+        run: ./gradlew clean build -Pmod_version=${{ steps.v.outputs.version }} -Pmcnet.videoNatives=video-natives -Pmcnet.iroh=iroh
 
       # A release jar that built successfully can still be unusable. Jar-in-Jar
       # is what makes MCNet a single-file install; if it silently did not
@@ -161,8 +239,16 @@ jobs:
           JAR="build/libs/mcnet-${VERSION}.jar"
           test -f "$JAR" || { echo "::error::$JAR was not produced"; exit 1; }
 
-          unzip -l "$JAR" | grep -q 'META-INF/jars/iroh-' \
-            || { echo "::error::iroh bindings are missing from the jar"; exit 1; }
+          # The patched iroh bindings are compiled into the core rather than
+          # nested, with one native library per platform beside them. Without
+          # DhtAddressLookup the build fell back to the published bindings.
+          unzip -l "$JAR" | grep -q 'computer/iroh/DhtAddressLookup.class' \
+            || { echo "::error::the jar has no DHT-capable iroh bindings"; exit 1; }
+          for native in darwin-aarch64/libiroh_ffi.dylib linux-x86-64/libiroh_ffi.so \
+                        linux-aarch64/libiroh_ffi.so win32-x86-64/iroh_ffi.dll; do
+            unzip -l "$JAR" | grep -q "$native" \
+              || { echo "::error::$native is missing from the jar"; exit 1; }
+          done
           unzip -l "$JAR" | grep -q 'META-INF/jars/jna-' \
             || { echo "::error::JNA is missing from the jar"; exit 1; }
           unzip -p "$JAR" fabric.mod.json | grep -q "\"version\":\"${VERSION}\"" \
@@ -178,7 +264,7 @@ jobs:
 
           unzip -l "$VOICE" | grep -q 'META-INF/jars/opus4j-' \
             || { echo "::error::opus4j is missing from the voice jar"; exit 1; }
-          if unzip -l "$VOICE" | grep -q 'META-INF/jars/iroh-'; then
+          if unzip -l "$VOICE" | grep -qE 'META-INF/jars/iroh-|computer/iroh/'; then
             echo "::error::the voice jar must not bundle iroh; the core already does"; exit 1
           fi
           unzip -p "$VOICE" fabric.mod.json | grep -q "\"version\":\"${VERSION}\"" \
