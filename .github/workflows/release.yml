@@ -183,14 +183,16 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
         # The GitHub CLI ships on the runner, so this needs no third-party
         # action with write access to the repository.
+        # Assets are named without the version so that
+        # releases/latest/download/mcnet.jar always points at the newest jar.
         run: |
           set -euo pipefail
-          gh release upload "$TAG" \
-            "build/libs/mcnet-${VERSION}.jar" \
-            "build/libs/mcnet-${VERSION}-sources.jar" \
-            "voice/build/libs/mcnet-voice-${VERSION}.jar" \
-            "voice/build/libs/mcnet-voice-${VERSION}-sources.jar" \
-            --clobber
+          mkdir -p release-assets
+          cp "build/libs/mcnet-${VERSION}.jar" release-assets/mcnet.jar
+          cp "build/libs/mcnet-${VERSION}-sources.jar" release-assets/mcnet-sources.jar
+          cp "voice/build/libs/mcnet-voice-${VERSION}.jar" release-assets/mcnet-voice.jar
+          cp "voice/build/libs/mcnet-voice-${VERSION}-sources.jar" release-assets/mcnet-voice-sources.jar
+          gh release upload "$TAG" release-assets/*.jar --clobber
 
       - uses: actions/upload-artifact@v7
         with:

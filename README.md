@@ -425,6 +425,13 @@ stamped into both `fabric.mod.json` files via `-Pmod_version`, so the release
 and the mod metadata cannot disagree. The core and the addon are versioned
 together; the addon declares the core version it was built against.
 
+The attached jars carry no version in their names (`mcnet.jar`,
+`mcnet-voice.jar`, plus their `-sources` jars), so these links always
+download the newest release:
+
+- https://github.com/playforge-coding/MCNet/releases/latest/download/mcnet.jar
+- https://github.com/playforge-coding/MCNet/releases/latest/download/mcnet-voice.jar
+
 Before publishing, the workflow checks that each jar is actually usable: the
 iroh bindings and JNA must be nested inside the core, opus4j and all four
 video libraries inside the addon, and the version must be stamped. A Jar-in-Jar failure still produces a jar
