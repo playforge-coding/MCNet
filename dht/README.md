@@ -14,32 +14,51 @@ hold.
 [iroh-ffi]: https://github.com/n0-computer/iroh-ffi
 [`iroh-mainline-address-lookup`]: https://crates.io/crates/iroh-mainline-address-lookup
 
-## Why a fork is needed
+## Why it needs a patch
 
 `iroh-mainline-address-lookup` is a separate crate from `iroh-ffi`, so the
 published Kotlin bindings have no way to reach it. The patch adds about 80
 lines: a `DhtAddressLookup` UniFFI object and one
 `EndpointBuilder.address_lookup()` method.
 
-The good news is that upstream's `release.yml` already cross-builds
-`libiroh_ffi` for linux-x86_64, linux-aarch64, macOS-aarch64, windows-x86_64 and
-the Android ABIs, and assembles the Maven artifact. **A fork inherits all of
-it**, so there is no native build pipeline to write.
+There is no fork to maintain. The build applies the patch to a fresh clone of
+upstream every time it builds the bindings.
 
-## Applying the patch
+## How the build applies it
+
+[`build.sh`](build.sh) does the whole job for the machine it runs on:
+
+1. clones upstream iroh-ffi at the tag matching `iroh_version` in
+   `gradle.properties` into a temporary directory
+2. runs [`apply.sh`](apply.sh) on the clone
+3. builds `libiroh_ffi` with cargo
+4. generates the Kotlin bindings from the built library, using upstream's own
+   `uniffi.toml` so the API matches the published bindings exactly
+5. deletes the clone
 
 ```sh
-git clone https://github.com/n0-computer/iroh-ffi
-./apply.sh /path/to/iroh-ffi
+dht/build.sh /some/out-dir
 ```
+
+It leaves `<out-dir>/kotlin/` (the generated bindings) and
+`<out-dir>/natives/<jna prefix>/<library>`. Cargo writes to `dht/target/`
+rather than the temporary clone, so iroh's dependencies are compiled once and
+reused by later runs. The first run takes several minutes, since upstream
+builds with LTO.
+
+You rarely need to run it by hand. The Gradle build runs it whenever `cargo` is
+on the PATH, then compiles the bindings straight into the core mod and puts the
+library where JNA looks for it. A jar built that way only carries the library
+for the machine that built it. CI runs `build.sh` on each of the four platforms
+(darwin-aarch64, linux-x86-64, linux-aarch64, win32-x86-64) and passes the set
+to Gradle with `-Pmcnet.iroh=<dir>`, so release jars carry all four.
+
+Without cargo, or with `-Pmcnet.dht=false`, the build uses the published
+bindings instead and the DHT is unavailable.
 
 `apply.sh` anchors its edits on surrounding source text rather than line
 numbers, so it survives upstream drift. It is idempotent and verifies every
-edit before exiting. Set `WITH_MACOS_X64=1` to also add the
-`x86_64-apple-darwin` target that upstream omits. That missing target is why
-MCNet currently cannot run on Intel Macs.
-
-It touches four files and adds one:
+edit before exiting. It touches three files and adds one:
 
 | File | Change |
 |---|---|
@@ -47,20 +66,10 @@ It touches four files and adds one:
 | `src/lib.rs` | register + re-export the module |
 | `src/endpoint.rs` | `EndpointBuilder::address_lookup()` |
 | `Cargo.toml` | the `iroh-mainline-address-lookup` 0.6 dependency |
-| `.github/workflows/release.yml` | optional macOS x86_64 target |
 
-Then build and generate bindings:
-
-```sh
-cd /path/to/iroh-ffi
-cargo check                  # verified working against iroh-ffi 1.1.0
-cargo make bindgen-kotlin    # regenerates kotlin/lib/src/main/kotlin/
-cd kotlin && ./gradlew :lib:jar
-```
-
-> `kotlin/`'s Gradle wrapper is 8.14.5, which **cannot run on JDK 25**. It
-> fails with a bare `IllegalArgumentException: 25.0.4`. Build it with JDK 21.
-> MCNet itself needs JDK 25. This is the one trap in the process.
+When bumping `iroh_version`, the patch is the thing to check: if upstream moved
+one of the anchors, `apply.sh` fails with the name of the one it could not
+find.
 
 ## One design note
 
@@ -75,23 +84,6 @@ The generated Kotlin surface is:
 ```kotlin
 class DhtAddressLookup(publish: Boolean, unfiltered: Boolean)
 fun EndpointBuilder.addressLookup(lookup: DhtAddressLookup)   // throws IrohException
-```
-
-## Testing it against MCNet
-
-The jar from `:lib:jar` stages its native flat, but JNA wants a per-platform
-directory. Repack before use:
-
-```sh
-mkdir repack && cd repack && unzip -q /path/to/iroh-ffi/kotlin/lib/build/libs/lib.jar
-mkdir -p darwin-aarch64 && mv libiroh_ffi.dylib darwin-aarch64/
-jar --create --file /tmp/iroh-dht.jar -C . .
-```
-
-Then point MCNet's build at it:
-
-```sh
-./gradlew test -Pmcnet.irohJar=/tmp/iroh-dht.jar
 ```
 
 `MainlineDhtTest` branches on whether DHT support is present, so it is
@@ -114,20 +106,17 @@ DHT lookup attached.
 ever join, to avoid needless DHT writes. iroh publishes only relay addresses by
 default; direct IPs are opt-in via the `unfiltered` flag.
 
-MCNet reaches `DhtAddressLookup` reflectively (see [`MainlineDht.kt`]), so one
-build runs against either jar. If `addressLookup=dht` is set but the bindings
-lack support, it logs a warning and falls back to the n0 resolver rather than
-failing to start.
+MCNet reaches `DhtAddressLookup` reflectively (see [`MainlineDht.kt`]), so the
+same source compiles against either set of bindings. If `addressLookup=dht` is
+set but the jar was built without the patch, it logs a warning and falls back
+to the n0 resolver rather than failing to start.
 
 [`MainlineDht.kt`]: ../src/main/kotlin/dev/mcnet/net/MainlineDht.kt
 
 ## Still unverified
 
-Everything above is compile- and run-verified locally on macOS arm64: the patch
-compiles, the bindings generate, and an MCNet endpoint binds with a DHT lookup
-attached. Those run checks were done with `iroh-mainline-address-lookup` 0.4.
-Since the move to 0.6, only `cargo check` against iroh-ffi 1.1.0 has been
-rerun. Its API for everything the patch uses is unchanged.
+The patch compiles against iroh-ffi 1.1.0, the bindings generate, and an MCNet
+endpoint binds with a DHT lookup attached, all on macOS arm64.
 
 What has **not** been tested is an actual cross-machine resolution: one host
 publishing to Mainline and another peer resolving it by key alone. That needs

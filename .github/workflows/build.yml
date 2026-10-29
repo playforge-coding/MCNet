@@ -93,8 +93,75 @@ jobs:
           path: video/target/release/${{ matrix.library }}
           if-no-files-found: error
 
+  # iroh's native library with the Mainline DHT patch applied. dht/build.sh
+  # clones upstream iroh-ffi, patches it and builds it, so there is no fork to
+  # keep in sync. Same four platforms as the video library, each on its own
+  # runner, since the library links platform code.
+  iroh-natives:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            prefix: darwin-aarch64
+            library: libiroh_ffi.dylib
+          - os: ubuntu-24.04
+            prefix: linux-x86-64
+            library: libiroh_ffi.so
+          - os: ubuntu-24.04-arm
+            prefix: linux-aarch64
+            library: libiroh_ffi.so
+          - os: windows-2025
+            prefix: win32-x86-64
+            library: iroh_ffi.dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        id: rust
+
+      # The iroh version picks the upstream tag and the tree hash of dht/
+      # covers the patch. With the rustc version they identify the library
+      # and bindings exactly. Bump the leading v1 if dht/build.sh changes in
+      # a way its tree hash would not show.
+      - name: Compute the native cache key
+        id: key
+        shell: bash
+        run: |
+          echo "iroh=$(grep '^iroh_version=' gradle.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse HEAD:dht)" >> "$GITHUB_OUTPUT"
+
+      # Same key as release.yml, so a release of a commit that already
+      # built on main reuses its library.
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: iroh-out
+          key: iroh-native-v1-${{ matrix.prefix }}-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-${{ steps.key.outputs.iroh }}-${{ steps.key.outputs.tree }}
+
+      - name: Patch and build iroh-ffi
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: dht/build.sh iroh-out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: iroh-native-${{ matrix.prefix }}
+          path: iroh-out/natives/${{ matrix.prefix }}/${{ matrix.library }}
+          if-no-files-found: error
+
+      # The bindings come out the same on every platform, so one copy is
+      # enough.
+      - uses: actions/upload-artifact@v7
+        if: matrix.prefix == 'linux-x86-64'
+        with:
+          name: iroh-bindings
+          path: iroh-out/kotlin
+          if-no-files-found: error
+
   build:
-    needs: video-natives
+    needs: [video-natives, iroh-natives]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -119,20 +186,33 @@ jobs:
           pattern: video-native-*
           path: video-natives
 
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: iroh-native-*
+          path: iroh/natives
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: iroh-bindings
+          path: iroh/kotlin
+
       # Each artifact lands in a folder named after itself; JNA wants the
       # folders named after the platform.
-      - name: Arrange video natives
+      - name: Arrange natives
         run: |
           set -euo pipefail
           for dir in video-natives/video-native-*; do
             mv "$dir" "video-natives/${dir#video-natives/video-native-}"
           done
-          find video-natives -type f
+          for dir in iroh/natives/iroh-native-*; do
+            mv "$dir" "iroh/natives/${dir#iroh/natives/iroh-native-}"
+          done
+          find video-natives iroh -type f
 
       # The tests bind real iroh endpoints on loopback, so they exercise the
       # native library as well as the tunnel logic.
       - name: Build and test
-        run: ./gradlew build -Pmcnet.videoNatives=video-natives
+        run: ./gradlew build -Pmcnet.videoNatives=video-natives -Pmcnet.iroh=iroh
 
       - uses: actions/upload-artifact@v7
         with:

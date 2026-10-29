@@ -41,6 +41,77 @@ loom {
     }
 }
 
+// iroh's Kotlin bindings with the Mainline DHT patch from dht/ applied. There
+// is no fork: dht/build.sh clones upstream iroh-ffi into a temporary
+// directory, patches it, builds the native library and generates the bindings
+// from it. Three ways to get them, as with the voice addon's video library:
+//
+//  1. -Pmcnet.iroh=<dir>: the bindings plus prebuilt libraries for every
+//     platform, laid out as <dir>/kotlin and <dir>/natives/<jna prefix>. This
+//     is what CI passes after its per-platform build jobs.
+//  2. cargo on the PATH: run dht/build.sh here. The natives then cover this
+//     machine only, so the jar runs on nothing else.
+//  3. Neither: the published computer.iroh:iroh jar, which has natives for
+//     every platform but no DHT, so MainlineDht falls back to n0's resolver.
+//     -Pmcnet.dht=false forces this.
+//
+// Patched bindings are compiled straight into the mod instead of nested as a
+// jar, because Jar-in-Jar needs a maven coordinate to generate metadata from.
+val irohVersion = property("iroh_version") as String
+val prebuiltIroh = providers.gradleProperty("mcnet.iroh").map { file(it) }
+val cargoOnPath =
+    System
+        .getenv("PATH")
+        .orEmpty()
+        .split(File.pathSeparator)
+        .any { File(it, "cargo").canExecute() || File(it, "cargo.exe").canExecute() }
+val buildIrohLocally =
+    !prebuiltIroh.isPresent && cargoOnPath && providers.gradleProperty("mcnet.dht").orNull != "false"
+val patchedIroh = prebuiltIroh.isPresent || buildIrohLocally
+
+// The voice addon compiles against the same bindings, so it needs to know
+// which kind the core ended up with.
+extra["patchedIroh"] = patchedIroh
+
+val builtIroh = layout.buildDirectory.dir("iroh-ffi")
+val irohDir = prebuiltIroh.orElse(builtIroh.map { it.asFile })
+
+val buildIroh =
+    tasks.register<Exec>("buildIroh") {
+        description = "Clones iroh-ffi, applies the DHT patch and builds it for this machine."
+        enabled = buildIrohLocally
+        inputs.files(fileTree("dht") { exclude("target") }).withPropertyName("patch")
+        inputs.property("irohVersion", irohVersion)
+        outputs.dir(builtIroh)
+        commandLine("bash", "dht/build.sh", builtIroh.get().asFile.absolutePath)
+    }
+
+val irohBindings =
+    tasks.register<Sync>("irohBindings") {
+        description = "Collects the patched iroh Kotlin bindings for compilation."
+        dependsOn(buildIroh)
+        from(irohDir.map { it.resolve("kotlin") })
+        into(layout.buildDirectory.dir("generated/iroh/kotlin"))
+    }
+
+val irohNatives =
+    tasks.register<Sync>("irohNatives") {
+        description = "Puts the patched iroh libraries where JNA's classpath lookup finds them."
+        dependsOn(buildIroh)
+        from(irohDir.map { it.resolve("natives") })
+        into(layout.buildDirectory.dir("generated/iroh/natives"))
+    }
+
+if (patchedIroh) {
+    sourceSets.main {
+        kotlin.srcDir(irohBindings)
+        resources.srcDir(irohNatives)
+    }
+    if (!prebuiltIroh.isPresent) {
+        logger.lifecycle("MCNet: building iroh with DHT support for this machine only (see dht/README.md)")
+    }
+}
+
 // Dependencies that must travel inside the built jar, because they are not
 // shipped by Minecraft, Fabric Loader or fabric-language-kotlin.
 val bundled: Configuration = configurations.create("bundled")
@@ -54,22 +125,14 @@ dependencies {
     // Kotlin stdlib and kotlinx-coroutines at runtime.
     implementation("net.fabricmc:fabric-language-kotlin:${property("fabric_kotlin_version")}")
 
-    // iroh's Kotlin bindings. Transitivity is switched off deliberately: the
-    // artifact asks for its own kotlin-stdlib and kotlinx-coroutines, which
+    // The published iroh bindings, only when the patched ones above are not
+    // being built. Transitivity is switched off deliberately: the artifact
+    // asks for its own kotlin-stdlib and kotlinx-coroutines, which
     // fabric-language-kotlin already puts on the runtime classpath at a newer
-    // version. JNA is pulled in explicitly below instead.
-    //
-    // -Pmcnet.irohJar=/path/to/iroh.jar swaps in locally built bindings, which
-    // is how DHT support is tested before it is published. See dht/README.md.
-    val localIroh = providers.gradleProperty("mcnet.irohJar").orNull
-    if (localIroh != null) {
-        // Development override only: it goes on the compile and runtime
-        // classpath but is not nested into the mod jar, because Jar-in-Jar
-        // needs a maven coordinate to generate metadata from.
-        logger.lifecycle("MCNet: using local iroh bindings from $localIroh (not bundled)")
-        implementation(files(localIroh))
-    } else {
-        bundled("computer.iroh:iroh:${property("iroh_version")}") { isTransitive = false }
+    // version. JNA is pulled in explicitly below instead, and the patched
+    // bindings need it too.
+    if (!patchedIroh) {
+        bundled("computer.iroh:iroh:$irohVersion") { isTransitive = false }
     }
     bundled("net.java.dev.jna:jna:${property("jna_version")}")
 

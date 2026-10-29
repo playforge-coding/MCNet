@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Patches a checkout of n0-computer/iroh-ffi to expose the BitTorrent Mainline
-# DHT address lookup through the Kotlin bindings.
+# DHT address lookup through the Kotlin bindings. build.sh runs this on a fresh
+# clone; it also works on any checkout by hand.
 #
 #   ./apply.sh /path/to/iroh-ffi
 #
@@ -23,7 +24,10 @@ if ! grep -q 'name = "iroh-ffi"' "$FFI/Cargo.toml"; then
     exit 2
 fi
 
-py() { python3 - "$@"; }
+# Windows usually has `python` rather than `python3`.
+PYTHON=python3
+"$PYTHON" -c '' 2>/dev/null || PYTHON=python
+py() { "$PYTHON" - "$@"; }
 
 # 1. The new module ------------------------------------------------------------
 cp "$HERE/address_lookup.rs" "$FFI/src/address_lookup.rs"
@@ -111,30 +115,7 @@ open(p, "w").write(s)
 print("  + src/endpoint.rs address_lookup()")
 PYEOF
 
-# 5. Optional: add the macOS Intel target upstream omits ------------------------
-if [[ "${WITH_MACOS_X64:-0}" == "1" ]]; then
-    py "$FFI/.github/workflows/release.yml" <<'PYEOF'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-if "x86_64-apple-darwin" in s:
-    print("  = release.yml already builds macOS x86_64")
-else:
-    anchor = """          - name: macos-aarch64
-"""
-    idx = s.find(anchor)
-    assert idx != -1, "could not find the macos-aarch64 matrix entry"
-    end = s.find("          - name:", idx + 1)
-    block = s[idx:end if end != -1 else len(s)]
-    extra = (block.replace("macos-aarch64", "macos-x86_64")
-                  .replace("aarch64-apple-darwin", "x86_64-apple-darwin"))
-    s = s[:end] + extra + s[end:]
-    open(p, "w").write(s)
-    print("  + release.yml macOS x86_64 target")
-PYEOF
-fi
-
-# 6. Verify --------------------------------------------------------------------
+# 5. Verify --------------------------------------------------------------------
 echo
 fail=0
 check() { grep -q "$2" "$FFI/$1" && echo "  ok  $1: $3" || { echo "  FAIL $1: $3"; fail=1; }; }
@@ -149,5 +130,4 @@ if [[ $fail -ne 0 ]]; then
     echo "patch incomplete, see the failures above" >&2
     exit 1
 fi
-echo "Patched. Next:"
-echo "  cd $FFI && cargo check && cargo make bindgen-kotlin"
+echo "Patched."
