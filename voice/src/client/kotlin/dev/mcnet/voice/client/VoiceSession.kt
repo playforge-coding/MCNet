@@ -154,15 +154,19 @@ class VoiceSession private constructor(
             if (positional) placement = Placement.Pending
             return
         }
-        // Positions from another dimension mean nothing here.
-        if (level !== lastSeenLevel) {
+        // Positions from another dimension mean nothing here, and neither
+        // does having been near someone there.
+        val levelChanged = level !== lastSeenLevel
+        if (levelChanged) {
             lastSeen.clear()
             lastSeenLevel = level
         }
         val speakers = speakerToPlayer
         lastSeen.keys.retainAll(speakers.values.toSet())
         val viewer = camera.position()
-        val wasNear = near
+        // In a new level everyone arrives at the normal threshold rather
+        // than keeping the wider one for leaving.
+        val wasNear = if (levelChanged) emptySet() else near
         val nowNear = HashSet<UUID>()
         for (uuid in speakers.values) {
             if (uuid == me) continue
