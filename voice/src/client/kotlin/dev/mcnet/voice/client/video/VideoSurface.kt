@@ -25,6 +25,15 @@ import java.util.concurrent.atomic.AtomicInteger
  * The texture is also registered with the texture manager under [id], which
  * is how world geometry refers to a texture: by name, through a render type.
  * The HUD draws it by texture view instead; both go through [textureView].
+ * Drawn by name, a texture is sampled with its own sampler, so it carries
+ * [SAMPLER] rather than the nearest-neighbor one a plain [DynamicTexture]
+ * comes with.
+ *
+ * [textureView] may replace the texture, which closes the old one, so it
+ * must only be called while the frame is being extracted, never once
+ * drawing has begun: the HUD captures the view during extraction and draws
+ * it at the very end of the frame, and closing it in between would leave
+ * that draw with nothing to sample.
  */
 class VideoSurface(
     private val name: String,
@@ -106,7 +115,7 @@ class VideoSurface(
                     val manager = Minecraft.getInstance().textureManager
                     // Releasing closes the old texture as well.
                     if (current != null) manager.release(id)
-                    current = DynamicTexture({ "mcnet-voice $name" }, NativeImage(picture.width, picture.height, false))
+                    current = Texture(name, NativeImage(picture.width, picture.height, false))
                     manager.register(id, current)
                     texture = current
                 }
@@ -136,6 +145,16 @@ class VideoSurface(
         minecraft.execute {
             if (texture != null) minecraft.textureManager.release(id)
             texture = null
+        }
+    }
+
+    /** A dynamic texture that samples linearly, for when it is drawn by name. */
+    private class Texture(
+        name: String,
+        image: NativeImage,
+    ) : DynamicTexture({ "mcnet-voice $name" }, image) {
+        init {
+            sampler = SAMPLER
         }
     }
 

@@ -177,7 +177,7 @@ class VoiceSession private constructor(
                 if (position.distanceToSqr(viewer) <= limit * limit) nowNear += uuid
             }
         }
-        if (positional && range != null) {
+        if (positional) {
             val placed = HashMap<Int, Vec3>()
             speakers.forEach { (speaker, uuid) -> lastSeen[uuid]?.let { placed[speaker] = it } }
             // The camera reuses its vectors; copy them before handing them to another thread.

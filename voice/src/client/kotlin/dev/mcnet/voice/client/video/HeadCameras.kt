@@ -20,19 +20,27 @@ import net.minecraft.world.phys.Vec3
  *
  * Two passes a frame, both on the render thread. Extraction decides what to
  * draw while touching the game is allowed: who is on camera, visible and
- * near enough, and where each tile goes. Submission turns that list into
- * geometry and nothing more. Tiles are depth tested, so a wall hides a
- * camera the way it hides the player behind it.
+ * near enough, and where each tile goes. It also uploads each picture, since
+ * that may replace a texture and so must not happen once drawing has begun
+ * (see [VideoSurface]). Submission turns the list into geometry and nothing
+ * more. Tiles are depth tested, so a wall hides a camera the way it hides
+ * the player behind it.
  *
- * Your own camera is drawn above your own head only when the camera is
- * behind you, and the right way round rather than mirrored, because that
- * is how everyone else sees you.
+ * Who is near enough is the session's call (its `near` set), the same
+ * set that decides whose cameras are fetched, so a camera is never fetched
+ * and not drawn, or drawable and not fetched.
+ *
+ * Your own camera is drawn above your own head only in third person, and
+ * the right way round rather than mirrored, because that is how everyone
+ * else sees you.
  */
 object HeadCameras {
     private class Tile(
         val surface: VideoSurface,
         /** The bottom center of the tile, in world coordinates. */
         val position: Vec3,
+        /** In blocks, fixed at extraction so a resize mid-frame cannot skew it. */
+        val height: Float,
         val speaking: Boolean,
     )
 
@@ -53,22 +61,25 @@ object HeadCameras {
         val level = context.level()
         val camera = context.camera()
         val partialTick = context.deltaTracker().getGameTimeDeltaPartialTick(true)
+        val near = session.near
 
         val out = ArrayList<Tile>()
         for (entry in session.roster) {
             val self = entry.uuid == viewer.uuid
             if (self) {
                 if (!camera.isDetached || session.camera == null || !session.preview.hasPicture) continue
-            } else if (!entry.camera || VoiceClientConfig.isCameraHidden(entry.uuid)) {
+            } else if (!entry.camera || entry.uuid !in near || VoiceClientConfig.isCameraHidden(entry.uuid)) {
                 continue
             }
             val player = level.getPlayerByUUID(entry.uuid) ?: continue
             if (player.isSpectator || player.isInvisibleTo(viewer)) continue
-            val feet = player.getPosition(partialTick)
-            if (feet.distanceToSqr(camera.position()) > DRAW_RANGE * DRAW_RANGE) continue
             val surface = if (self) session.preview else session.receivers.surface(entry.speaker) ?: continue
+            // Uploads the newest picture and makes sure the texture is registered.
+            surface.textureView() ?: continue
+            val height = TILE_WIDTH * surface.height / surface.width.coerceAtLeast(1)
             val speaking = if (self) session.isTransmitting else session.isSpeaking(entry.uuid)
-            out += Tile(surface, feet.add(0.0, player.bbHeight + ABOVE_HEAD, 0.0), speaking)
+            val feet = player.getPosition(partialTick)
+            out += Tile(surface, feet.add(0.0, player.bbHeight + ABOVE_HEAD, 0.0), height, speaking)
         }
         return out
     }
@@ -80,10 +91,8 @@ object HeadCameras {
         val poseStack = context.poseStack()
         val collector = context.submitNodeCollector()
         for (tile in tiles) {
-            // Uploads the newest picture and makes sure the texture is registered.
-            tile.surface.textureView() ?: continue
             val width = TILE_WIDTH
-            val height = width * tile.surface.height / tile.surface.width.coerceAtLeast(1)
+            val height = tile.height
 
             poseStack.pushPose()
             poseStack.translate(tile.position.subtract(camera.pos))
@@ -147,7 +156,11 @@ object HeadCameras {
             .setNormal(pose, 0f, 0f, -1f)
     }
 
-    /** Cameras further away than this are neither drawn nor, with cameras above heads only, fetched. */
+    /**
+     * How close a player must come for their camera to be drawn and, with
+     * cameras above heads only, fetched. Once near, they stay near a little
+     * further out; see the session.
+     */
     const val DRAW_RANGE = 32.0
 
     /** Tile width in blocks. The height follows the picture. */

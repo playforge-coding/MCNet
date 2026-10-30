@@ -117,8 +117,8 @@ Voice is proximity based: a voice carries 48 blocks by default and fades with
 distance, placed in space where the speaker stands, and nobody in another
 dimension hears it. The host can change the range or turn proximity off, in
 which case everyone in the world hears everyone else. Cameras float above
-the heads of the players they belong to, and only the cameras of players
-within 32 blocks are fetched at all.
+the heads of the players they belong to, and by default only the cameras of
+players who come within 32 blocks are fetched at all.
 
 ### Using it
 
@@ -175,16 +175,19 @@ on from a stray keypress either.
 By default a player's camera floats above their head, just over the name
 tag, a block wide and turned to face you the way a name tag is, with a green
 frame while they speak. It is depth tested, so a wall hides it the way it
-hides the player, and it is drawn for players within 32 blocks. Your own
-camera appears above your own head too, but only when the camera is behind
-you, and the right way round rather than mirrored, because that is how
-everyone else sees it. *Cameras shown* switches to the HUD instead, or both.
+hides the player. It appears once a player comes within 32 blocks and stays
+until they are 40 blocks away. Your own camera appears above your own head
+too, but only in third person, and the right way round rather than mirrored,
+because that is how everyone else sees it. *Cameras shown* switches to the
+HUD instead, or both. With the HUD in either setting, every camera that is on
+is fetched, wherever its player is.
 
 On the HUD, cameras are tiles along the top-right edge, your own first and
 mirrored the way a mirror would show you, each labeled with the player's
 name and framed in green while that player is speaking. Your own preview is
-always there, whatever the placement, since in first person it is the only
-way to see that your camera is working. The voice HUD stays in the
+there whatever the placement, since in first person it is the only way to
+see that your camera is working; only *Show cameras* off hides it, along with
+everyone else's. The voice HUD stays in the
 bottom-right corner: the names of whoever is speaking, plus your own state
 when it matters (talking, muted, or disconnected).
 
@@ -306,11 +309,15 @@ off and straight back on can therefore never arrive the wrong way round.
 The relay forwards a camera only to participants who sent a `WATCH` for it.
 A client without the native video library never asks, so it costs the host no
 bandwidth; the same goes for a player who turned cameras off or hid one, and,
-with cameras shown above heads only, for every player further than 32 blocks
-from the viewer. The client decides who is near from the game's own entity
-tracking, once a frame, and lets go of a camera only once its player is 40
-blocks away, so someone pacing around the edge is not fetched and dropped over
-and over. The host also keeps each sender's current group in memory, and when
+with cameras shown above heads only, for every player who has not come within
+32 blocks of the viewer. The client decides who is near from the game's own
+entity tracking, once a frame, and lets go of a camera only once its player is
+40 blocks away, so someone pacing around the edge is not fetched and dropped
+over and over. That one decision drives both what is fetched and what is
+drawn, so the two never disagree. Asking the host to watch tells the
+client's own decoder first, because for the host's own player the host
+replays the current group the moment it is asked, and a decoder told second
+would discard it. The host also keeps each sender's current group in memory, and when
 someone starts watching mid-group it replays the group from its keyframe, so a
 new viewer, or a player who just walked into range, sees a picture at once
 instead of waiting up to three seconds for the next keyframe. Groups are three
@@ -324,7 +331,13 @@ where their head is this frame, and submission turns that list into one
 textured quad per player, rotated to face the camera like a name tag and lit
 at full brightness. For that the decoded picture's texture is registered with
 the game's texture manager by name, which is how world geometry refers to a
-texture; the HUD keeps drawing the same texture by its view.
+texture; the HUD keeps drawing the same texture by its view. Drawn by name, a
+texture brings its own sampler, so the picture's texture carries a linear one
+rather than the nearest-neighbor sampler the game's dynamic textures default
+to, which would shimmer on a picture shrunk to a block. New pictures are
+uploaded during extraction only, never once drawing has begun, because a
+picture that changed size replaces its texture, and the HUD captures its view
+of that texture during extraction but draws it at the very end of the frame.
 
 On the sending side, if the transport cannot take a frame the rest of that
 group is dropped, the bitrate comes down by a quarter, and a new group is
