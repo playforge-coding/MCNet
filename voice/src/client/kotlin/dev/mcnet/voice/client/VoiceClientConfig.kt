@@ -50,6 +50,22 @@ object VoiceClientConfig {
         }
     }
 
+    /** Where other players' cameras are drawn. Your own preview is always on the HUD. */
+    enum class CameraPlacement(
+        val aboveHead: Boolean,
+        val onHud: Boolean,
+    ) {
+        HEAD(aboveHead = true, onHud = false),
+        HUD(aboveHead = false, onHud = true),
+        BOTH(aboveHead = true, onHud = true),
+        ;
+
+        companion object {
+            fun parse(raw: String?): CameraPlacement =
+                entries.firstOrNull { it.name.equals(raw?.trim(), ignoreCase = true) } ?: HEAD
+        }
+    }
+
     private val gson = GsonBuilder().setPrettyPrinting().create()
     private val path: Path get() = FabricLoader.getInstance().configDir.resolve("mcnet-voice.json")
 
@@ -82,6 +98,8 @@ object VoiceClientConfig {
 
     /** Whether other players' cameras are shown (and fetched) at all. */
     @Volatile var showCameras: Boolean = true
+
+    @Volatile var cameraPlacement: CameraPlacement = CameraPlacement.HEAD
 
     /** Width of each camera tile on the HUD, in GUI pixels. */
     @Volatile var cameraTileWidth: Int = 128
@@ -140,6 +158,7 @@ object VoiceClientConfig {
             camera = root.get("camera")?.asString ?: ""
             cameraQuality = CameraQuality.parse(root.get("cameraQuality")?.asString)
             showCameras = root.get("showCameras")?.asBoolean ?: true
+            cameraPlacement = CameraPlacement.parse(root.get("cameraPlacement")?.asString)
             cameraTileWidth = (root.get("cameraTileWidth")?.asInt ?: 128).coerceIn(MIN_TILE_WIDTH, MAX_TILE_WIDTH)
             mutedPlayers.clear()
             root.getAsJsonArray("mutedPlayers")?.forEach { element ->
@@ -173,6 +192,7 @@ object VoiceClientConfig {
                 addProperty("camera", camera)
                 addProperty("cameraQuality", cameraQuality.name.lowercase())
                 addProperty("showCameras", showCameras)
+                addProperty("cameraPlacement", cameraPlacement.name.lowercase())
                 addProperty("cameraTileWidth", cameraTileWidth)
                 add("mutedPlayers", JsonArray().apply { mutedPlayers.forEach { add(it.toString()) } })
                 add("hiddenCameras", JsonArray().apply { hiddenCameras.forEach { add(it.toString()) } })

@@ -12,9 +12,12 @@ import net.minecraft.resources.Identifier
 
 /**
  * Camera tiles along the top-right edge: this player's own camera first,
- * mirrored like a mirror would be, then everyone else's. A green frame marks
- * whoever is speaking, which is the one piece of voice state worth showing
- * on a face.
+ * mirrored like a mirror would be, then everyone else's if cameras are set
+ * to show on the HUD. A green frame marks whoever is speaking, which is the
+ * one piece of voice state worth showing on a face.
+ *
+ * The own preview is always here, whatever the placement, since in first
+ * person it is the only way to see that your camera is working.
  */
 object VideoHud : HudElement {
     fun register() {
@@ -42,6 +45,7 @@ object VideoHud : HudElement {
             tiles += Tile(session.preview, Component.translatable("mcnet-voice.hud.you"), session.isTransmitting, true)
         }
         for (entry in session.roster) {
+            if (!VoiceClientConfig.cameraPlacement.onHud) break
             if (entry.uuid == me || !entry.camera || VoiceClientConfig.isCameraHidden(entry.uuid)) continue
             val surface = session.receivers.surface(entry.speaker) ?: continue
             tiles += Tile(surface, Component.literal(entry.name), session.isSpeaking(entry.uuid), false)

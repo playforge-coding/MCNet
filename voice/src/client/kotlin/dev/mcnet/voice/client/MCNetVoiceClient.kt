@@ -9,6 +9,7 @@ import dev.mcnet.voice.VoiceLog
 import dev.mcnet.voice.VoicePayloads
 import dev.mcnet.voice.VoiceServer
 import dev.mcnet.voice.client.gui.VoiceSettingsScreen
+import dev.mcnet.voice.client.video.HeadCameras
 import dev.mcnet.voice.client.video.VideoNative
 import kotlinx.coroutines.launch
 import net.fabricmc.api.ClientModInitializer
@@ -91,6 +92,7 @@ object MCNetVoiceClient : ClientModInitializer {
 
         VoiceHud.register()
         VideoHud.register()
+        HeadCameras.register()
 
         ScreenEvents.AFTER_INIT.register { _, screen, _, _ ->
             if (screen is PauseScreen && screen.showsPauseMenu()) addSettingsButton(screen)

@@ -185,15 +185,25 @@ class VoiceSettingsScreen(
         showCameras.width = HALF_WIDTH
         row(quality, showCameras)
 
+        val placement =
+            CycleButton
+                .builder<VoiceClientConfig.CameraPlacement>({ placementLabel(it) }, VoiceClientConfig.cameraPlacement)
+                .withValues(VoiceClientConfig.CameraPlacement.entries)
+                .create(Component.translatable("mcnet-voice.settings.camera_placement")) { _, value ->
+                    VoiceClientConfig.cameraPlacement = value
+                    MCNetVoiceClient.session?.refreshWatches()
+                }
+        placement.width = HALF_WIDTH
+
         val tileWidth =
             ValueSlider(
-                FULL_WIDTH,
+                HALF_WIDTH,
                 VoiceClientConfig.MIN_TILE_WIDTH.toDouble(),
                 VoiceClientConfig.MAX_TILE_WIDTH.toDouble(),
                 VoiceClientConfig.cameraTileWidth.toDouble(),
                 { Component.translatable("mcnet-voice.settings.camera_size", it.roundToInt()) },
             ) { VoiceClientConfig.cameraTileWidth = it.roundToInt() }
-        contents.addChild(tileWidth)
+        row(placement, tileWidth)
 
         status = contents.addChild(MultiLineTextWidget(Component.empty(), font).setMaxWidth(FULL_WIDTH))
 
@@ -256,6 +266,9 @@ class VoiceSettingsScreen(
 
     private fun qualityLabel(quality: VoiceClientConfig.CameraQuality): Component =
         Component.translatable("mcnet-voice.settings.camera_quality.value", quality.height, quality.kbps)
+
+    private fun placementLabel(placement: VoiceClientConfig.CameraPlacement): Component =
+        Component.translatable("mcnet-voice.settings.camera_placement.${placement.name.lowercase()}")
 
     override fun repositionElements() {
         layout.arrangeElements()

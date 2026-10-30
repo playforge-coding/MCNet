@@ -116,9 +116,9 @@ playing; they just cannot hear, be heard, or see anyone's camera.
 Voice is proximity based: a voice carries 48 blocks by default and fades with
 distance, placed in space where the speaker stands, and nobody in another
 dimension hears it. The host can change the range or turn proximity off, in
-which case everyone in the world hears everyone else. Cameras are not subject
-to range yet: every camera that is on is shown to everyone who has cameras
-enabled.
+which case everyone in the world hears everyone else. Cameras float above
+the heads of the players they belong to, and only the cameras of players
+within 32 blocks are fetched at all.
 
 ### Using it
 
@@ -167,14 +167,24 @@ across sessions. Everything lives in `config/mcnet-voice.json`.
 The camera row of the same screen has the on/off switch, the device, the
 quality (240p at 200 kbps up to 720p at 1500 kbps, with the width following
 the camera's aspect ratio), whether other players' cameras are shown at all,
-and how wide the tiles are. The on/off switch is the one setting that is not
-saved: a camera never comes on by itself when a session starts, and the key
-binding is unbound by default so it cannot come on from a stray keypress
-either.
+where they are shown, and how wide the HUD tiles are. The on/off switch is
+the one setting that is not saved: a camera never comes on by itself when a
+session starts, and the key binding is unbound by default so it cannot come
+on from a stray keypress either.
 
-Cameras appear as tiles along the top-right edge, your own first and mirrored
-the way a mirror would show you, each labeled with the player's name and
-framed in green while that player is speaking. The voice HUD stays in the
+By default a player's camera floats above their head, just over the name
+tag, a block wide and turned to face you the way a name tag is, with a green
+frame while they speak. It is depth tested, so a wall hides it the way it
+hides the player, and it is drawn for players within 32 blocks. Your own
+camera appears above your own head too, but only when the camera is behind
+you, and the right way round rather than mirrored, because that is how
+everyone else sees it. *Cameras shown* switches to the HUD instead, or both.
+
+On the HUD, cameras are tiles along the top-right edge, your own first and
+mirrored the way a mirror would show you, each labeled with the player's
+name and framed in green while that player is speaking. Your own preview is
+always there, whatever the placement, since in first person it is the only
+way to see that your camera is working. The voice HUD stays in the
 bottom-right corner: the names of whoever is speaking, plus your own state
 when it matters (talking, muted, or disconnected).
 
@@ -295,12 +305,26 @@ off and straight back on can therefore never arrive the wrong way round.
 
 The relay forwards a camera only to participants who sent a `WATCH` for it.
 A client without the native video library never asks, so it costs the host no
-bandwidth; the same goes for a player who turned cameras off or hid one. The
-host also keeps each sender's current group in memory, and when someone starts
-watching mid-group it replays the group from its keyframe, so a new viewer
-sees a picture at once instead of waiting up to three seconds for the next
-keyframe. Groups are three seconds long for the same reason: nothing waits on
-keyframes except recovery from a skipped group.
+bandwidth; the same goes for a player who turned cameras off or hid one, and,
+with cameras shown above heads only, for every player further than 32 blocks
+from the viewer. The client decides who is near from the game's own entity
+tracking, once a frame, and lets go of a camera only once its player is 40
+blocks away, so someone pacing around the edge is not fetched and dropped over
+and over. The host also keeps each sender's current group in memory, and when
+someone starts watching mid-group it replays the group from its keyframe, so a
+new viewer, or a player who just walked into range, sees a picture at once
+instead of waiting up to three seconds for the next keyframe. Groups are three
+seconds long for the same reason: nothing waits on keyframes except recovery
+from a skipped group.
+
+A camera above a head is drawn in two passes a frame, the way the game draws
+everything else in the world: extraction decides what to draw while touching
+the game is allowed, which is who is on camera, visible, within range, and
+where their head is this frame, and submission turns that list into one
+textured quad per player, rotated to face the camera like a name tag and lit
+at full brightness. For that the decoded picture's texture is registered with
+the game's texture manager by name, which is how world geometry refers to a
+texture; the HUD keeps drawing the same texture by its view.
 
 On the sending side, if the transport cannot take a frame the rest of that
 group is dropped, the bitrate comes down by a quarter, and a new group is
