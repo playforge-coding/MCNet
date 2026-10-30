@@ -36,6 +36,8 @@
 	"mcnet-voice.settings.status.idle": "Not in a voice session. Join or host an MCNet world with the addon installed on both sides.",
 	"mcnet-voice.settings.status.live": "Connected with %s other participant(s).",
 	"mcnet-voice.settings.status.camera_live": "Connected with %s other participant(s). Sending your camera at %s, %s kbps.",
+	"mcnet-voice.settings.status.range": " Voices carry %s blocks.",
+	"mcnet-voice.settings.status.no_range": " Everyone hears everyone.",
 	"mcnet-voice.settings.status.connecting": "Connecting to voice...",
 	"mcnet-voice.settings.status.error": "Voice failed: %s",
 	"mcnet-voice.settings.status.camera_error": "Camera failed: %s",

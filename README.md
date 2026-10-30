@@ -113,8 +113,12 @@ punching and relay fallback included. Install it next to `mcnet` on the host
 and on every player who wants to talk or be seen. Players without it keep
 playing; they just cannot hear, be heard, or see anyone's camera.
 
-There is no proximity yet. Everyone in the world hears everyone else, and
-every camera that is on is shown to everyone who has cameras enabled.
+Voice is proximity based: a voice carries 48 blocks by default and fades with
+distance, placed in space where the speaker stands, and nobody in another
+dimension hears it. The host can change the range or turn proximity off, in
+which case everyone in the world hears everyone else. Cameras are not subject
+to range yet: every camera that is on is shown to everyone who has cameras
+enabled.
 
 ### Using it
 
@@ -122,6 +126,19 @@ Nothing to configure. When the host is hosting over MCNet and a player joins
 with the addon installed, the server offers voice and the client connects.
 That includes the host's own player on a singleplayer world, and it includes
 players who joined over plain LAN rather than through a join code.
+
+The host has two settings of its own in `config/mcnet-voice-server.json`,
+read by whoever runs the relay, which is the dedicated server or the client
+hosting a singleplayer world:
+
+| Setting | Default | Does |
+|---|---|---|
+| `proximity` | `true` | Whether voices fade with distance at all |
+| `range` | `48` | How far a voice carries, in blocks, from 1 to 512 |
+
+Range is enforced by the host and announced to everyone who joins, so a
+joiner's own config has no say in how far voices carry on someone else's
+world. The settings screen shows the range of the world you are in.
 
 | Key | Default | Does |
 |---|---|---|
@@ -159,10 +176,20 @@ macOS instead, so if the game vanishes at that moment, that is why.
 ### How it works
 
 The design is a star. Every client holds one QUIC connection to the host over
-a dedicated `mcnet-voice/2` ALPN, and the host relays each frame to everyone
-else. A mesh would avoid the hop through the host, but the star is what makes
-proximity a small change later: the server knows every player's position, so
-proximity becomes a filter in the relay loop rather than a redesign.
+a dedicated `mcnet-voice/3` ALPN, and the host relays each frame to everyone
+else in earshot. A mesh would avoid the hop through the host, but the star is
+what makes proximity cheap and trustworthy: the server is the one place that
+knows every player's position, so proximity is a filter in the relay loop,
+and no client can hear a voice the host did not forward to it.
+
+Every server tick copies each player's eye position and dimension into a
+snapshot the relay reads from its network threads. A frame is forwarded to a
+participant only if they are in the speaker's dimension and within the range
+plus ten percent. The margin is there because clients place voices from their
+own view of where players are, which lags the server's by a little, and so
+that the cut happens where the client's own falloff has already reached
+silence. A participant whose position is not in the snapshot yet, because
+they are still loading in, hears everyone until it is.
 
 ![Three players each hold one iroh connection to the VoiceServer relay in the host process, and the host's own player attaches to the relay in-process](docs/voice-topology.drawio.svg)
 
@@ -186,9 +213,21 @@ through the OpenAL that Minecraft already ships, on a separate context bound to
 the voice thread with `ALC_EXT_thread_local_context`, so the game's own sound
 engine never notices. Capture uses OpenAL too.
 
+Each voice is an OpenAL source placed where its speaker stands, so OpenAL
+does the panning and the attenuation. The client needs no positions from the
+voice connection for that: the game already tracks every nearby player, and
+once a frame the session records where the camera and each participant are
+for the audio thread to read. The listener stays at the origin and sources
+are placed at their offset from it, because OpenAL works in single precision
+and Minecraft coordinates run into the millions. The falloff is linear, at
+full volume within four blocks and reaching silence exactly at the announced
+range, which is just inside where the relay stops forwarding. A speaker the
+game has no position for, or a world without proximity, plays as plain mono.
+
 Control traffic, which does need to arrive in order, uses one bidirectional
-stream per connection: the participant roster from the host, and keepalive
-pings so a silent listener is not dropped for idling.
+stream per connection: the host's settings (currently just the range) and the
+participant roster, and keepalive pings so a silent listener is not dropped
+for idling.
 
 **Identity.** A voice connection is admitted only if the game session has
 vouched for its endpoint id. The server sends an offer containing a ticket and

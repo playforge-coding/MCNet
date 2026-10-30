@@ -20,10 +20,13 @@ import java.util.UUID
  * and never to the Minecraft server.
  *
  * Version 2 added cameras: a flag per roster entry, two control messages,
- * and video on unidirectional streams. Version 1 clients cannot connect, and
- * since the addon is versioned with the core that is the intended outcome.
+ * and video on unidirectional streams. Version 3 added proximity: the host
+ * announces its voice range in a [Control.SETTINGS] message so that clients
+ * can fade voices out where the relay stops forwarding them. Older clients
+ * cannot connect, and since the addon is versioned with the core that is the
+ * intended outcome.
  */
-val VOICE_ALPN: ByteArray = "mcnet-voice/2".toByteArray(Charsets.US_ASCII)
+val VOICE_ALPN: ByteArray = "mcnet-voice/3".toByteArray(Charsets.US_ASCII)
 
 /** Opus runs at 48 kHz; a 20 ms frame is 960 samples. */
 const val SAMPLE_RATE = 48_000
@@ -171,6 +174,13 @@ object Control {
     /** Host to client: the full participant list. Sent on every change. */
     const val ROSTER: Byte = 0x10
 
+    /**
+     * Host to client: how the host is running the call, currently just the
+     * voice range in blocks, with 0 meaning everyone hears everyone. Sent
+     * once on joining, before the first roster, and again if it changes.
+     */
+    const val SETTINGS: Byte = 0x11
+
     /** Either direction. Keeps the connection from idling out while nobody talks. */
     const val PING: Byte = 0x20
     const val PONG: Byte = 0x21
@@ -277,6 +287,15 @@ object Control {
         fun close() {
             queue.close()
         }
+    }
+
+    fun encodeSettings(range: Float): ByteArray = ByteBuffer.allocate(4).putFloat(range).array()
+
+    /** The voice range in blocks, or null for a malformed body. */
+    fun decodeSettings(body: ByteArray): Float? {
+        if (body.size != 4) return null
+        val range = ByteBuffer.wrap(body).getFloat()
+        return if (range.isNaN() || range < 0f) null else range
     }
 
     fun encodeCamera(on: Boolean): ByteArray = byteArrayOf(if (on) 1 else 0)

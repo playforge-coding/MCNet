@@ -57,6 +57,15 @@ class VoiceProtocolTest {
     }
 
     @Test
+    fun `settings carry the range and refuse one that cannot be right`() {
+        assertEquals(48f, Control.decodeSettings(Control.encodeSettings(48f)))
+        assertEquals(0f, Control.decodeSettings(Control.encodeSettings(0f)))
+        assertNull(Control.decodeSettings(Control.encodeSettings(-1f)))
+        assertNull(Control.decodeSettings(Control.encodeSettings(Float.NaN)))
+        assertNull(Control.decodeSettings(byteArrayOf(1, 2)))
+    }
+
+    @Test
     fun `a control message is length-prefixed with the type inside the length`() {
         val bytes = Control.frame(Control.ROSTER, byteArrayOf(1, 2, 3))
         assertContentEquals(byteArrayOf(0, 4, Control.ROSTER, 1, 2, 3), bytes)

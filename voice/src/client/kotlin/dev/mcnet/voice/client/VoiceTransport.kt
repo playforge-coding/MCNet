@@ -25,6 +25,9 @@ interface TransportListener {
         event: VideoEvent,
     )
 
+    /** The host's voice range in blocks, 0 for none. Arrives before the first roster. */
+    fun onSettings(range: Float)
+
     fun onRoster(entries: List<RosterEntry>)
 
     fun onClosed(reason: String)
@@ -97,10 +100,9 @@ class RemoteTransport(
                                 val message =
                                     Control.read(recv)
                                         ?: throw IllegalStateException("host closed the voice control stream")
-                                if (message.type ==
-                                    Control.ROSTER
-                                ) {
-                                    listener.onRoster(Control.decodeRoster(message.body))
+                                when (message.type) {
+                                    Control.ROSTER -> listener.onRoster(Control.decodeRoster(message.body))
+                                    Control.SETTINGS -> Control.decodeSettings(message.body)?.let(listener::onSettings)
                                 }
                             }
                         }
@@ -198,6 +200,8 @@ class LocalTransport(
                     group: Int,
                     event: VideoEvent,
                 ) = listener.onVideo(speaker, group, event)
+
+                override fun settings(range: Float) = listener.onSettings(range)
 
                 override fun roster(entries: List<RosterEntry>) = listener.onRoster(entries)
 

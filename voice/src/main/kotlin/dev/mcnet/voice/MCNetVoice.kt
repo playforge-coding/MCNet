@@ -9,6 +9,7 @@ import dev.mcnet.net.Protocols
 import kotlinx.coroutines.launch
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
@@ -32,10 +33,17 @@ import java.util.concurrent.ConcurrentHashMap
  *    player.
  * 3. The client dials the ticket over [VOICE_ALPN]. The core routes that
  *    connection to [VoiceServer.accept], which admits it because of the binding.
+ *
+ * Proximity needs the relay to know where everyone is. The relay runs on
+ * network threads and must not touch [ServerPlayer], so every server tick
+ * copies each player's eye position into [positions], and the relay reads
+ * from that.
  */
 object MCNetVoice : ModInitializer {
+    private val positions = ConcurrentHashMap<UUID, VoiceServer.Position>()
+
     /** The relay. One per process; idle until someone is offered voice. */
-    val server = VoiceServer(IrohRuntime.scope)
+    val server = VoiceServer(IrohRuntime.scope) { uuid -> positions[uuid] }
 
     private val random = SecureRandom()
     private val nonces = ConcurrentHashMap<UUID, ByteArray>()
@@ -44,6 +52,9 @@ object MCNetVoice : ModInitializer {
     private var minecraftServer: MinecraftServer? = null
 
     override fun onInitialize() {
+        VoiceServerConfig.load()
+        server.range = VoiceServerConfig.effectiveRange
+
         PayloadTypeRegistry.clientboundPlay().register(VoicePayloads.Available.TYPE, VoicePayloads.Available.CODEC)
         PayloadTypeRegistry.serverboundPlay().register(VoicePayloads.Hello.TYPE, VoicePayloads.Hello.CODEC)
 
@@ -57,8 +68,10 @@ object MCNetVoice : ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPED.register {
             minecraftServer = null
             nonces.clear()
+            positions.clear()
             server.stop()
         }
+        ServerTickEvents.END_SERVER_TICK.register(::snapshotPositions)
 
         ServerPlayConnectionEvents.JOIN.register { handler, _, _ ->
             if (MCNet.isHosting) offer(handler.player)
@@ -66,6 +79,7 @@ object MCNetVoice : ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register { handler, _ ->
             val uuid = handler.player.uuid
             nonces.remove(uuid)
+            positions.remove(uuid)
             server.playerLeft(uuid)
         }
 
@@ -78,6 +92,28 @@ object MCNetVoice : ModInitializer {
         MCNetEvents.HOSTING_STOPPED.register { server.stop() }
 
         VoiceLog.logger.info("MCNet Voice ready")
+    }
+
+    /**
+     * Server thread, once a tick. Nothing to do while nobody is in the call
+     * or while everyone hears everyone anyway.
+     */
+    private fun snapshotPositions(mc: MinecraftServer) {
+        if (server.isEmpty || server.range <= 0.0) return
+        for (player in mc.playerList.players) {
+            val eye = player.eyePosition
+            positions[player.uuid] =
+                VoiceServer.Position(
+                    player
+                        .level()
+                        .dimension()
+                        .identifier()
+                        .toString(),
+                    eye.x,
+                    eye.y,
+                    eye.z,
+                )
+        }
     }
 
     /**

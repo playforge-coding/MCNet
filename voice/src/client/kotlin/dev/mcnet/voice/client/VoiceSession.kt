@@ -9,11 +9,16 @@ import dev.mcnet.voice.VoiceLog
 import dev.mcnet.voice.VoiceServer
 import dev.mcnet.voice.client.audio.Microphone
 import dev.mcnet.voice.client.audio.Playback
+import dev.mcnet.voice.client.audio.Spatial
 import dev.mcnet.voice.client.video.CameraSender
 import dev.mcnet.voice.client.video.VideoNative
 import dev.mcnet.voice.client.video.VideoReceivers
 import dev.mcnet.voice.client.video.VideoSurface
 import kotlinx.coroutines.launch
+import net.minecraft.client.Camera
+import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.world.phys.Vec3
+import org.joml.Vector3f
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,6 +46,13 @@ class VoiceSession private constructor(
     /** Everyone in the call, as the host last announced it. Includes this player. */
     @Volatile var roster: List<RosterEntry> = emptyList()
         private set
+
+    /** How far voices carry on this host, in blocks. Zero means they do not fade at all. */
+    @Volatile var range: Float = 0f
+        private set
+
+    /** The last frame's listener and speaker positions, for [Playback]. Null while voices are not placed. */
+    @Volatile private var spatial: Spatial? = null
 
     @Volatile var microphone: Microphone? = null
         private set
@@ -86,6 +98,32 @@ class VoiceSession private constructor(
     }
 
     fun isSpeaking(uuid: UUID): Boolean = speaking().any { it.uuid == uuid }
+
+    /**
+     * Render thread, once a frame. Records where the camera and every other
+     * participant are so the audio thread can place their voices. The game
+     * already tracks nearby players, so no positions travel over voice.
+     */
+    fun updateSpatial(
+        camera: Camera,
+        level: ClientLevel,
+        partialTick: Float,
+    ) {
+        val range = range
+        if (range <= 0f || state != State.LIVE) {
+            spatial = null
+            return
+        }
+        val speakers = HashMap<Int, Vec3>()
+        for ((speaker, uuid) in speakerToPlayer) {
+            if (uuid == me) continue
+            val player = level.getPlayerByUUID(uuid) ?: continue
+            speakers[speaker] = player.getEyePosition(partialTick)
+        }
+        // The camera reuses its vectors; copy them before handing them to another thread.
+        spatial =
+            Spatial(range, camera.position(), Vector3f(camera.forwardVector()), Vector3f(camera.upVector()), speakers)
+    }
 
     /** Tears the audio down and brings it back on the configured devices. */
     fun restartAudio() {
@@ -160,12 +198,12 @@ class VoiceSession private constructor(
     }
 
     private fun startAudio() {
-        playback =
-            Playback(VoiceClientConfig.speaker) { speaker ->
-                val player = speakerToPlayer[speaker]
-                val perPlayer = if (player == null) 1.0 else VoiceClientConfig.volumeOf(player)
-                (perPlayer * VoiceClientConfig.volume).toFloat()
-            }.start()
+        val gainFor = { speaker: Int ->
+            val player = speakerToPlayer[speaker]
+            val perPlayer = if (player == null) 1.0 else VoiceClientConfig.volumeOf(player)
+            (perPlayer * VoiceClientConfig.volume).toFloat()
+        }
+        playback = Playback(VoiceClientConfig.speaker, gainFor) { spatial }.start()
         microphone = Microphone(VoiceClientConfig.microphone, this).start()
     }
 
@@ -200,6 +238,11 @@ class VoiceSession private constructor(
         group: Int,
         event: VideoEvent,
     ) = receivers.onVideo(speaker, group, event)
+
+    override fun onSettings(range: Float) {
+        this.range = range
+        if (range <= 0f) spatial = null
+    }
 
     override fun onRoster(entries: List<RosterEntry>) {
         val previous = speakerToPlayer.keys

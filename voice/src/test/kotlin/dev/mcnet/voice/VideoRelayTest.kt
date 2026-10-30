@@ -336,6 +336,8 @@ class VideoRelayTest {
                             seen += Triple(speaker, group, event)
                         }
 
+                        override fun settings(range: Float) {}
+
                         override fun roster(entries: List<RosterEntry>) {}
 
                         override fun closed(reason: String) {}

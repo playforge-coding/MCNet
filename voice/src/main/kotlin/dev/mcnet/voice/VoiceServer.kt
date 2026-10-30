@@ -13,10 +13,9 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * The host side of voice and video: one relay that every participant talks to.
  *
- * A star rather than a mesh, on purpose. With no proximity every frame goes
- * to everyone anyway, and when proximity does arrive the server is the one
- * place that knows every player's position, so it becomes a filter in
- * [relay] rather than a redesign.
+ * A star rather than a mesh, on purpose. The server is the one place that
+ * knows every player's position, so proximity is a filter in [relay] rather
+ * than something every client has to be trusted with.
  *
  * Identity is the iroh endpoint id, which the QUIC handshake has already
  * authenticated by the time [accept] runs. [bind] ties an endpoint id to a
@@ -25,26 +24,52 @@ import java.util.concurrent.atomic.AtomicInteger
  * player holds the key. So the join code remains the only credential, and
  * nobody can speak under another player's name.
  *
- * Audio goes to everyone. Video goes only to participants who asked to
- * watch that sender, and the relay keeps each sender's current group of
- * pictures so a new watcher can start decoding at once instead of waiting
- * for the next keyframe.
+ * Audio goes to everyone within [range] of the speaker, in the same
+ * dimension, as reported by [positions]. Video goes only to participants who
+ * asked to watch that sender, and the relay keeps each sender's current
+ * group of pictures so a new watcher can start decoding at once instead of
+ * waiting for the next keyframe.
  *
  * The host's own player cannot dial their own endpoint, so they join through
  * [attachLocal] instead, in-process. On a dedicated server that path is
  * simply never used.
  *
  * Nothing in here knows about Minecraft; the tests run it against bare iroh
- * endpoints.
+ * endpoints with positions they make up.
  */
 class VoiceServer(
     private val scope: CoroutineScope,
+    private val positions: Positions = Positions { null },
 ) {
     /** What the game session told us about an endpoint. */
     data class Player(
         val uuid: UUID,
         val name: String,
     )
+
+    /** Where a player is, as the game last reported it. */
+    data class Position(
+        val dimension: String,
+        val x: Double,
+        val y: Double,
+        val z: Double,
+    ) {
+        fun distanceSquaredTo(other: Position): Double {
+            val dx = x - other.x
+            val dy = y - other.y
+            val dz = z - other.z
+            return dx * dx + dy * dy + dz * dz
+        }
+    }
+
+    /**
+     * The game's view of where everyone is. Called on network threads for
+     * every relayed frame, so it should be a lookup in a snapshot, not a
+     * trip to the server thread. Null means unknown.
+     */
+    fun interface Positions {
+        fun of(uuid: UUID): Position?
+    }
 
     /** Where a participant's frames and roster updates go. */
     interface Sink {
@@ -55,6 +80,8 @@ class VoiceServer(
             group: Int,
             event: VideoEvent,
         )
+
+        fun settings(range: Float)
 
         fun roster(entries: List<RosterEntry>)
 
@@ -104,6 +131,8 @@ class VoiceServer(
             event: VideoEvent,
         )
 
+        abstract fun sendSettings(range: Float)
+
         abstract fun sendRoster(entries: List<RosterEntry>)
 
         abstract fun close(reason: String)
@@ -127,6 +156,18 @@ class VoiceServer(
     private val waiters = ConcurrentHashMap<String, CompletableDeferred<Player>>()
     private val participants = ConcurrentHashMap<UUID, Participant>()
     private val nextSpeaker = AtomicInteger(1)
+
+    /**
+     * How far a voice carries, in blocks. Zero means everyone hears everyone,
+     * whatever [positions] says. Changing it tells every participant.
+     */
+    @Volatile var range: Double = 0.0
+        set(value) {
+            val clamped = value.coerceAtLeast(0.0)
+            if (field == clamped) return
+            field = clamped
+            participants.values.forEach { it.sendSettings(clamped.toFloat()) }
+        }
 
     /** Everyone currently in the call. */
     val roster: List<RosterEntry> get() = participants.values.map { it.entry }.sortedBy { it.speaker }
@@ -278,6 +319,9 @@ class VoiceServer(
     }
 
     private fun join(participant: Participant) {
+        // Settings first, so the client knows the range before the first
+        // frame it hears.
+        participant.sendSettings(range.toFloat())
         // A reconnect replaces the previous session for the same player.
         participants.put(participant.player.uuid, participant)?.let { previous ->
             previous.close("replaced by a new connection")
@@ -302,8 +346,13 @@ class VoiceServer(
     }
 
     /**
-     * Fans one participant's frame out to everyone else. This is the function
-     * proximity would filter in.
+     * Fans one participant's frame out to everyone else in earshot.
+     *
+     * Earshot is [range] plus a small margin, so the cut happens where the
+     * client's own falloff has already reached silence and the speaker's
+     * position as the client sees it is allowed to lag the server's by a
+     * little. A participant whose position is unknown (they are still
+     * loading in, say) hears everyone until it is.
      */
     private fun relay(
         from: Participant,
@@ -311,9 +360,23 @@ class VoiceServer(
     ) {
         if (!VoiceFrames.isWellFormed(datagram)) return
         VoiceFrames.restamp(datagram, from.speaker)
+        val range = range
+        val origin = if (range > 0.0) positions.of(from.player.uuid) else null
+        val reach = range * RELAY_MARGIN
         participants.values.forEach { target ->
-            if (target !== from) target.deliver(datagram)
+            if (target === from) return@forEach
+            if (origin != null && !inEarshot(origin, positions.of(target.player.uuid), reach)) return@forEach
+            target.deliver(datagram)
         }
+    }
+
+    private fun inEarshot(
+        speaker: Position,
+        listener: Position?,
+        reach: Double,
+    ): Boolean {
+        if (listener == null) return true
+        return listener.dimension == speaker.dimension && speaker.distanceSquaredTo(listener) <= reach * reach
     }
 
     /**
@@ -424,6 +487,10 @@ class VoiceServer(
             video.handle(speaker, group, event)
         }
 
+        override fun sendSettings(range: Float) {
+            control.send(Control.SETTINGS, Control.encodeSettings(range))
+        }
+
         override fun sendRoster(entries: List<RosterEntry>) {
             control.send(Control.ROSTER, Control.encodeRoster(entries))
         }
@@ -451,6 +518,8 @@ class VoiceServer(
             event: VideoEvent,
         ) = sink.video(speaker, group, event)
 
+        override fun sendSettings(range: Float) = sink.settings(range)
+
         override fun sendRoster(entries: List<RosterEntry>) = sink.roster(entries)
 
         // Callers have already taken this participant out of the map.
@@ -467,5 +536,8 @@ class VoiceServer(
 
         /** A group larger than this is not replayed to late watchers. Generous for webcam bitrates. */
         const val GROUP_BUFFER_LIMIT = 2 * 1024 * 1024
+
+        /** The relay forwards this much further than the range clients fade out at. */
+        const val RELAY_MARGIN = 1.1
     }
 }

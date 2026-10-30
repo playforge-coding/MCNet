@@ -298,12 +298,14 @@ class VoiceSettingsScreen(
                             session.others.size,
                             camera.description,
                             camera.kbps,
-                        ).withStyle(ChatFormatting.GREEN)
+                        ).append(rangeNote(session))
+                        .withStyle(ChatFormatting.GREEN)
                 }
 
                 session.state == VoiceSession.State.LIVE -> {
                     Component
                         .translatable("mcnet-voice.settings.status.live", session.others.size)
+                        .append(rangeNote(session))
                         .withStyle(ChatFormatting.GREEN)
                 }
 
@@ -318,6 +320,14 @@ class VoiceSettingsScreen(
                 }
             }
     }
+
+    /** How far voices carry on this host, which the host decides, not this screen. */
+    private fun rangeNote(session: VoiceSession): Component =
+        if (session.range > 0f) {
+            Component.translatable("mcnet-voice.settings.status.range", session.range.roundToInt())
+        } else {
+            Component.translatable("mcnet-voice.settings.status.no_range")
+        }
 
     private fun onDevicesChanged() {
         MCNetVoiceClient.session?.restartAudio()
