@@ -6,7 +6,6 @@ import dev.mcnet.voice.Opus
 import dev.mcnet.voice.SAMPLE_RATE
 import dev.mcnet.voice.VoiceFrames
 import dev.mcnet.voice.VoiceLog
-import net.minecraft.world.phys.Vec3
 import org.lwjgl.BufferUtils
 import org.lwjgl.openal.AL
 import org.lwjgl.openal.AL10
@@ -26,20 +25,26 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * `ALC_EXT_thread_local_context`, so Minecraft's sound engine, which owns the
  * process-wide current context, never notices.
  *
- * When [spatial] has a scene, each source sits where its speaker stands,
+ * When [placement] is positional, each source sits where its speaker stands,
  * relative to the listener, and OpenAL pans and attenuates it. The falloff
  * is linear and reaches silence exactly at the range the host announced,
  * which is just inside where the relay stops forwarding, so a voice walking
- * out of range fades rather than cuts. Without a scene, or for a speaker the
- * game has no position for, the source is listener-relative at the origin,
- * which is to say plain mono.
+ * out of range fades rather than cuts. A speaker this client has never seen
+ * is muted rather than played flat, since flat would mean full volume for
+ * someone who may be at the edge of range. On a host without proximity
+ * every source is listener-relative at the origin, which is to say plain
+ * mono.
+ *
+ * Placement changes once a frame at most, while this thread ticks every few
+ * milliseconds, so sources and the listener are only touched when a new
+ * [Placement] arrives.
  *
  * Mixing is OpenAL's job. This class only decodes and keeps each source fed.
  */
 class Playback(
     private val deviceName: String,
     private val gainFor: (speaker: Int) -> Float,
-    private val spatial: () -> Spatial?,
+    private val placement: () -> Placement,
 ) {
     private val queue = ConcurrentLinkedQueue<VoiceFrames.Frame>()
     private val retire = ConcurrentLinkedQueue<Int>()
@@ -93,18 +98,19 @@ class Playback(
 
         val streams = HashMap<Int, SpeakerStream>()
         val orientation = FloatArray(6)
+        var lastScene: Placement? = null
         try {
             while (running) {
                 while (true) {
                     val frame = queue.poll() ?: break
-                    streams.getOrPut(frame.speaker) { SpeakerStream() }.push(frame)
+                    streams.getOrPut(frame.speaker) { SpeakerStream(frame.speaker) }.push(frame)
                 }
                 while (true) {
                     val speaker = retire.poll() ?: break
                     streams.remove(speaker)?.close()
                 }
-                val scene = spatial()
-                if (scene != null) {
+                val scene = placement()
+                if (scene !== lastScene && scene is Placement.Positional) {
                     orientation[0] = scene.forward.x()
                     orientation[1] = scene.forward.y()
                     orientation[2] = scene.forward.z()
@@ -113,9 +119,8 @@ class Playback(
                     orientation[5] = scene.up.z()
                     AL10.alListenerfv(AL10.AL_ORIENTATION, orientation)
                 }
-                streams.forEach { (speaker, stream) ->
-                    stream.step(gainFor(speaker), scene?.offsetOf(speaker), scene?.range ?: 0f)
-                }
+                lastScene = scene
+                streams.forEach { (speaker, stream) -> stream.step(gainFor(speaker), scene) }
                 Thread.sleep(TICK_MS)
             }
         } catch (e: Exception) {
@@ -144,7 +149,9 @@ class Playback(
      * end of a burst or after a short starvation, so a dropped sender does
      * not hiss forever.
      */
-    private class SpeakerStream {
+    private class SpeakerStream(
+        private val speaker: Int,
+    ) {
         private val source = AL10.alGenSources()
         private val decoder: OpusDecoder = Opus.decoder()
         private val pending = TreeMap<Int, ByteArray>(SEQUENCE_ORDER)
@@ -155,6 +162,11 @@ class Playback(
         private var ended = false
         private var next = 0
         private var starved = 0
+
+        /** The placement this source was last positioned for; a new one means it moves. */
+        private var placedFor: Placement? = null
+        private var audible = false
+        private var appliedGain = Float.NaN
 
         init {
             AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE)
@@ -171,28 +183,16 @@ class Playback(
             pending[frame.sequence] = frame.payload
         }
 
-        /**
-         * Feeds the source and places it. [offset] is the speaker's position
-         * relative to the listener; null, or a [range] of zero, puts the
-         * voice at the listener with no attenuation.
-         */
+        /** Feeds the source, moving it first if [scene] is a new placement. */
         fun step(
             gain: Float,
-            offset: Vec3?,
-            range: Float,
+            scene: Placement,
         ) {
-            AL10.alSourcef(source, AL10.AL_GAIN, gain)
-            if (offset != null && range > 0f) {
-                AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_FALSE)
-                AL10.alSource3f(source, AL10.AL_POSITION, offset.x.toFloat(), offset.y.toFloat(), offset.z.toFloat())
-                // Full volume up close, then a straight line down to silence
-                // at the range. The reference distance must stay under the
-                // range for the line to have somewhere to go.
-                AL10.alSourcef(source, AL10.AL_REFERENCE_DISTANCE, minOf(FULL_VOLUME_DISTANCE, range / 2f))
-                AL10.alSourcef(source, AL10.AL_MAX_DISTANCE, range)
-            } else {
-                AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE)
-                AL10.alSource3f(source, AL10.AL_POSITION, 0f, 0f, 0f)
+            if (scene !== placedFor) place(scene)
+            val effective = if (audible) gain else 0f
+            if (effective != appliedGain) {
+                AL10.alSourcef(source, AL10.AL_GAIN, effective)
+                appliedGain = effective
             }
 
             repeat(AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED)) {
@@ -213,6 +213,40 @@ class Playback(
 
             if (queued > 0 && AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE) != AL10.AL_PLAYING) {
                 AL10.alSourcePlay(source)
+            }
+        }
+
+        private fun place(scene: Placement) {
+            placedFor = scene
+            when (scene) {
+                Placement.Pending -> {
+                    audible = false
+                }
+
+                Placement.Flat -> {
+                    audible = true
+                    AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE)
+                    AL10.alSource3f(source, AL10.AL_POSITION, 0f, 0f, 0f)
+                }
+
+                is Placement.Positional -> {
+                    val offset = scene.offsetOf(speaker)
+                    audible = offset != null
+                    if (offset == null) return
+                    AL10.alSourcei(source, AL10.AL_SOURCE_RELATIVE, AL10.AL_FALSE)
+                    AL10.alSource3f(
+                        source,
+                        AL10.AL_POSITION,
+                        offset.x.toFloat(),
+                        offset.y.toFloat(),
+                        offset.z.toFloat(),
+                    )
+                    // Full volume up close, then a straight line down to
+                    // silence at the range. The reference distance must stay
+                    // under the range for the line to have somewhere to go.
+                    AL10.alSourcef(source, AL10.AL_REFERENCE_DISTANCE, minOf(FULL_VOLUME_DISTANCE, scene.range / 2f))
+                    AL10.alSourcef(source, AL10.AL_MAX_DISTANCE, scene.range)
+                }
             }
         }
 

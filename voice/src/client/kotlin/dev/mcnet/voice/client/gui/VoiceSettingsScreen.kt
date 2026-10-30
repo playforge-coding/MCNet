@@ -321,13 +321,18 @@ class VoiceSettingsScreen(
             }
     }
 
-    /** How far voices carry on this host, which the host decides, not this screen. */
-    private fun rangeNote(session: VoiceSession): Component =
-        if (session.range > 0f) {
-            Component.translatable("mcnet-voice.settings.status.range", session.range.roundToInt())
+    /**
+     * How far voices carry on this host, which the host decides, not this
+     * screen. Says nothing until the host has said, rather than guessing.
+     */
+    private fun rangeNote(session: VoiceSession): Component {
+        val range = session.range ?: return Component.empty()
+        return if (range > 0f) {
+            Component.translatable("mcnet-voice.settings.status.range", range.roundToInt())
         } else {
             Component.translatable("mcnet-voice.settings.status.no_range")
         }
+    }
 
     private fun onDevicesChanged() {
         MCNetVoiceClient.session?.restartAudio()

@@ -171,12 +171,37 @@ class VoiceRelayTest {
                 assertEquals(3, heardBy(bobConn))
                 assertEquals(3, heardBy(carolConn), "carol walked into range")
 
+                // The margin: past the range, but inside 48 + 4.8 blocks.
+                positions[carolUuid] = VoiceServer.Position("overworld", 50.0, 64.0, 0.0)
+                aliceSays(4)
+                assertEquals(4, heardBy(bobConn))
+                assertEquals(4, heardBy(carolConn), "carol is in the margin past the range")
+
+                positions[carolUuid] = VoiceServer.Position("overworld", 53.0, 64.0, 0.0)
+                aliceSays(5)
+                assertEquals(5, heardBy(bobConn))
+                assertNull(silentFor(carolConn), "carol is past the margin")
+
+                // Nobody is guessed at: an unknown listener hears nothing, and
+                // an unknown speaker is heard by no one.
+                positions.remove(bobUuid)
+                positions[carolUuid] = VoiceServer.Position("overworld", 5.0, 64.0, 0.0)
+                aliceSays(6)
+                assertEquals(6, heardBy(carolConn))
+                assertNull(silentFor(bobConn), "bob's position is unknown")
+
+                positions[bobUuid] = VoiceServer.Position("overworld", 10.0, 64.0, 0.0)
+                positions.remove(aliceUuid)
+                aliceSays(7)
+                assertNull(silentFor(bobConn), "alice's position is unknown")
+                assertNull(silentFor(carolConn), "alice's position is unknown")
+
                 // Turning proximity off reaches everyone, and says so.
                 server.range = 0.0
                 assertEquals(0f, settingsOf(carolControl))
                 positions[carolUuid] = VoiceServer.Position("the_end", 1000.0, 64.0, 0.0)
-                aliceSays(4)
-                assertEquals(4, heardBy(carolConn))
+                aliceSays(8)
+                assertEquals(8, heardBy(carolConn))
             }
         }
 
@@ -206,6 +231,8 @@ class VoiceRelayTest {
 
             val heard = CopyOnWriteArrayList<ByteArray>()
             val rosters = CopyOnWriteArrayList<List<RosterEntry>>()
+            val ranges = CopyOnWriteArrayList<Float>()
+            server.range = 48.0
             val local =
                 server.attachLocal(
                     VoiceServer.Player(UUID.randomUUID(), "host"),
@@ -220,7 +247,9 @@ class VoiceRelayTest {
                             event: VideoEvent,
                         ) {}
 
-                        override fun settings(range: Float) {}
+                        override fun settings(range: Float) {
+                            ranges += range
+                        }
 
                         override fun roster(entries: List<RosterEntry>) {
                             rosters += entries
@@ -229,6 +258,10 @@ class VoiceRelayTest {
                         override fun closed(reason: String) {}
                     },
                 )
+            assertEquals(listOf(48f), ranges, "the local participant is told the range on joining")
+            // No positions in this test, so proximity would let nothing through.
+            server.range = 0.0
+            assertEquals(listOf(48f, 0f), ranges, "and again when it changes")
 
             withTimeout(60_000) {
                 val (aliceConn, aliceControl) = dial(alice, hostEndpoint)

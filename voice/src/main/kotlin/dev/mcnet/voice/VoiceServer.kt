@@ -159,10 +159,12 @@ class VoiceServer(
 
     /**
      * How far a voice carries, in blocks. Zero means everyone hears everyone,
-     * whatever [positions] says. Changing it tells every participant.
+     * whatever [positions] says. Changing it tells every participant. Must be
+     * finite: a NaN would compare as no range and quietly turn proximity off.
      */
     @Volatile var range: Double = 0.0
         set(value) {
+            require(value.isFinite()) { "voice range must be finite, got $value" }
             val clamped = value.coerceAtLeast(0.0)
             if (field == clamped) return
             field = clamped
@@ -348,11 +350,16 @@ class VoiceServer(
     /**
      * Fans one participant's frame out to everyone else in earshot.
      *
-     * Earshot is [range] plus a small margin, so the cut happens where the
+     * Earshot is [range] plus a margin, so the cut happens where the
      * client's own falloff has already reached silence and the speaker's
      * position as the client sees it is allowed to lag the server's by a
-     * little. A participant whose position is unknown (they are still
-     * loading in, say) hears everyone until it is.
+     * little. The margin is a tenth of the range but never under
+     * [MIN_MARGIN] blocks, since lag is measured in blocks walked, not in
+     * percent, and a small range would otherwise leave no room for it.
+     *
+     * With proximity on, a frame goes nowhere if either end's position is
+     * unknown. That only lasts until the next tick snapshots everyone, and
+     * guessing would mean ignoring the dimension rule.
      */
     private fun relay(
         from: Participant,
@@ -361,8 +368,13 @@ class VoiceServer(
         if (!VoiceFrames.isWellFormed(datagram)) return
         VoiceFrames.restamp(datagram, from.speaker)
         val range = range
-        val origin = if (range > 0.0) positions.of(from.player.uuid) else null
-        val reach = range * RELAY_MARGIN
+        val origin =
+            if (range > 0.0) {
+                positions.of(from.player.uuid) ?: return
+            } else {
+                null
+            }
+        val reach = range + maxOf(range * MARGIN_FRACTION, MIN_MARGIN)
         participants.values.forEach { target ->
             if (target === from) return@forEach
             if (origin != null && !inEarshot(origin, positions.of(target.player.uuid), reach)) return@forEach
@@ -375,7 +387,7 @@ class VoiceServer(
         listener: Position?,
         reach: Double,
     ): Boolean {
-        if (listener == null) return true
+        if (listener == null) return false
         return listener.dimension == speaker.dimension && speaker.distanceSquaredTo(listener) <= reach * reach
     }
 
@@ -537,7 +549,10 @@ class VoiceServer(
         /** A group larger than this is not replayed to late watchers. Generous for webcam bitrates. */
         const val GROUP_BUFFER_LIMIT = 2 * 1024 * 1024
 
-        /** The relay forwards this much further than the range clients fade out at. */
-        const val RELAY_MARGIN = 1.1
+        /** How much further than the range the relay forwards, as a fraction of the range. */
+        const val MARGIN_FRACTION = 0.1
+
+        /** The least the relay forwards beyond the range, in blocks. */
+        const val MIN_MARGIN = 2.0
     }
 }

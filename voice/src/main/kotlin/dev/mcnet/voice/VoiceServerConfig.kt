@@ -36,12 +36,29 @@ object VoiceServerConfig {
             save()
             return
         }
+        // Both settings are parsed before either is applied, so a file that
+        // fails halfway can never leave proximity off by accident.
         runCatching {
             val root = JsonParser.parseString(Files.readString(file)).asJsonObject
-            proximity = root.get("proximity")?.asBoolean ?: true
-            range = (root.get("range")?.asDouble ?: DEFAULT_RANGE).coerceIn(MIN_RANGE, MAX_RANGE)
+            val proximity = root.get("proximity")?.asBoolean ?: true
+            var range = root.get("range")?.asDouble ?: DEFAULT_RANGE
+            if (!range.isFinite()) {
+                // coerceIn passes NaN straight through, and the relay would
+                // read a NaN range as no proximity at all.
+                VoiceLog.logger.warn("{}: range {} is not a distance; using {}", file, range, DEFAULT_RANGE)
+                range = DEFAULT_RANGE
+            }
+            this.proximity = proximity
+            this.range = range.coerceIn(MIN_RANGE, MAX_RANGE)
         }.onFailure {
-            VoiceLog.logger.warn("could not read {}; falling back to defaults", file, it)
+            proximity = true
+            range = DEFAULT_RANGE
+            VoiceLog.logger.warn(
+                "could not read {}; using proximity on at {} blocks until it is fixed",
+                file,
+                DEFAULT_RANGE,
+                it,
+            )
         }
     }
 

@@ -8,8 +8,8 @@ import dev.mcnet.voice.VoiceFrames
 import dev.mcnet.voice.VoiceLog
 import dev.mcnet.voice.VoiceServer
 import dev.mcnet.voice.client.audio.Microphone
+import dev.mcnet.voice.client.audio.Placement
 import dev.mcnet.voice.client.audio.Playback
-import dev.mcnet.voice.client.audio.Spatial
 import dev.mcnet.voice.client.video.CameraSender
 import dev.mcnet.voice.client.video.VideoNative
 import dev.mcnet.voice.client.video.VideoReceivers
@@ -47,12 +47,24 @@ class VoiceSession private constructor(
     @Volatile var roster: List<RosterEntry> = emptyList()
         private set
 
-    /** How far voices carry on this host, in blocks. Zero means they do not fade at all. */
-    @Volatile var range: Float = 0f
+    /**
+     * How far voices carry on this host, in blocks. Zero means they do not
+     * fade at all; null means the host has not said yet.
+     */
+    @Volatile var range: Float? = null
         private set
 
-    /** The last frame's listener and speaker positions, for [Playback]. Null while voices are not placed. */
-    @Volatile private var spatial: Spatial? = null
+    /** Where voices come from as of the last frame, for [Playback]. */
+    @Volatile private var placement: Placement = Placement.Pending
+
+    /**
+     * Render thread only. Where each speaker was last seen. A speaker can be
+     * in voice range but beyond the distance the server tracks players to
+     * this client at; keeping their last position fades them out from where
+     * they left rather than snapping them into the listener's head.
+     */
+    private val lastSeen = HashMap<Int, Vec3>()
+    private var lastSeenLevel: ClientLevel? = null
 
     @Volatile var microphone: Microphone? = null
         private set
@@ -100,9 +112,10 @@ class VoiceSession private constructor(
     fun isSpeaking(uuid: UUID): Boolean = speaking().any { it.uuid == uuid }
 
     /**
-     * Render thread, once a frame. Records where the camera and every other
-     * participant are so the audio thread can place their voices. The game
-     * already tracks nearby players, so no positions travel over voice.
+     * Render thread, once a frame. Records where this player's head and
+     * every other participant are, and which way the camera faces, so the
+     * audio thread can place their voices. The game already tracks nearby
+     * players, so no positions travel over voice.
      */
     fun updateSpatial(
         camera: Camera,
@@ -110,19 +123,40 @@ class VoiceSession private constructor(
         partialTick: Float,
     ) {
         val range = range
-        if (range <= 0f || state != State.LIVE) {
-            spatial = null
+        if (state != State.LIVE || range == null) {
+            placement = Placement.Pending
             return
         }
-        val speakers = HashMap<Int, Vec3>()
-        for ((speaker, uuid) in speakerToPlayer) {
+        if (range <= 0f) {
+            placement = Placement.Flat
+            return
+        }
+        val listener = level.getPlayerByUUID(me)
+        if (listener == null) {
+            placement = Placement.Pending
+            return
+        }
+        // Positions from another dimension mean nothing here.
+        if (level !== lastSeenLevel) {
+            lastSeen.clear()
+            lastSeenLevel = level
+        }
+        val speakers = speakerToPlayer
+        lastSeen.keys.retainAll(speakers.keys)
+        for ((speaker, uuid) in speakers) {
             if (uuid == me) continue
             val player = level.getPlayerByUUID(uuid) ?: continue
-            speakers[speaker] = player.getEyePosition(partialTick)
+            lastSeen[speaker] = player.getEyePosition(partialTick)
         }
         // The camera reuses its vectors; copy them before handing them to another thread.
-        spatial =
-            Spatial(range, camera.position(), Vector3f(camera.forwardVector()), Vector3f(camera.upVector()), speakers)
+        placement =
+            Placement.Positional(
+                range,
+                Vector3f(camera.forwardVector()),
+                Vector3f(camera.upVector()),
+                listener.getEyePosition(partialTick),
+                HashMap(lastSeen),
+            )
     }
 
     /** Tears the audio down and brings it back on the configured devices. */
@@ -203,7 +237,7 @@ class VoiceSession private constructor(
             val perPlayer = if (player == null) 1.0 else VoiceClientConfig.volumeOf(player)
             (perPlayer * VoiceClientConfig.volume).toFloat()
         }
-        playback = Playback(VoiceClientConfig.speaker, gainFor) { spatial }.start()
+        playback = Playback(VoiceClientConfig.speaker, gainFor) { placement }.start()
         microphone = Microphone(VoiceClientConfig.microphone, this).start()
     }
 
@@ -241,7 +275,8 @@ class VoiceSession private constructor(
 
     override fun onSettings(range: Float) {
         this.range = range
-        if (range <= 0f) spatial = null
+        // A positive range waits for the next frame to place anyone.
+        placement = if (range <= 0f) Placement.Flat else Placement.Pending
     }
 
     override fun onRoster(entries: List<RosterEntry>) {

@@ -52,9 +52,6 @@ object MCNetVoice : ModInitializer {
     private var minecraftServer: MinecraftServer? = null
 
     override fun onInitialize() {
-        VoiceServerConfig.load()
-        server.range = VoiceServerConfig.effectiveRange
-
         PayloadTypeRegistry.clientboundPlay().register(VoicePayloads.Available.TYPE, VoicePayloads.Available.CODEC)
         PayloadTypeRegistry.serverboundPlay().register(VoicePayloads.Hello.TYPE, VoicePayloads.Hello.CODEC)
 
@@ -64,7 +61,13 @@ object MCNetVoice : ModInitializer {
             onHello(context.player(), payload)
         }
 
-        ServerLifecycleEvents.SERVER_STARTING.register { minecraftServer = it }
+        ServerLifecycleEvents.SERVER_STARTING.register {
+            minecraftServer = it
+            // Read per world, so an edit applies to the next world opened
+            // without restarting the game.
+            VoiceServerConfig.load()
+            server.range = VoiceServerConfig.effectiveRange
+        }
         ServerLifecycleEvents.SERVER_STOPPED.register {
             minecraftServer = null
             nonces.clear()
@@ -95,11 +98,12 @@ object MCNetVoice : ModInitializer {
     }
 
     /**
-     * Server thread, once a tick. Nothing to do while nobody is in the call
-     * or while everyone hears everyone anyway.
+     * Server thread, once a tick. Nothing to do while everyone hears everyone
+     * anyway. It runs even while nobody is in the call, so the snapshot is
+     * never stale when someone joins or hosting starts again.
      */
     private fun snapshotPositions(mc: MinecraftServer) {
-        if (server.isEmpty || server.range <= 0.0) return
+        if (server.range <= 0.0) return
         for (player in mc.playerList.players) {
             val eye = player.eyePosition
             positions[player.uuid] =

@@ -138,7 +138,17 @@ hosting a singleplayer world:
 
 Range is enforced by the host and announced to everyone who joins, so a
 joiner's own config has no say in how far voices carry on someone else's
-world. The settings screen shows the range of the world you are in.
+world. The settings screen shows the range of the world you are in. The file
+is read each time a world starts, so an edit applies to the next world you
+open without restarting the game. A file that cannot be read, or a range
+that is not a number, falls back to proximity on at 48 blocks, never to
+proximity off.
+
+A range wider than the server's entity tracking distance for players
+(roughly its view distance) is allowed, but a client only knows where the
+players it can see are. A speaker who walks out of tracking keeps sounding
+from where they were last seen until the host stops forwarding them, and a
+speaker the client has never seen at all stays silent.
 
 | Key | Default | Does |
 |---|---|---|
@@ -185,11 +195,13 @@ and no client can hear a voice the host did not forward to it.
 Every server tick copies each player's eye position and dimension into a
 snapshot the relay reads from its network threads. A frame is forwarded to a
 participant only if they are in the speaker's dimension and within the range
-plus ten percent. The margin is there because clients place voices from their
-own view of where players are, which lags the server's by a little, and so
-that the cut happens where the client's own falloff has already reached
-silence. A participant whose position is not in the snapshot yet, because
-they are still loading in, hears everyone until it is.
+plus a margin of ten percent, or two blocks if that is more. The margin is
+there because clients place voices from their own view of where players are,
+which lags the server's by a little, and so that the cut happens where the
+client's own falloff has already reached silence. The snapshot keeps being
+taken while nobody is in the call, so it is never stale when someone joins.
+If either end's position is missing anyway, the frame is not forwarded:
+guessing would mean ignoring the dimension rule.
 
 ![Three players each hold one iroh connection to the VoiceServer relay in the host process, and the host's own player attaches to the relay in-process](docs/voice-topology.drawio.svg)
 
@@ -216,13 +228,22 @@ engine never notices. Capture uses OpenAL too.
 Each voice is an OpenAL source placed where its speaker stands, so OpenAL
 does the panning and the attenuation. The client needs no positions from the
 voice connection for that: the game already tracks every nearby player, and
-once a frame the session records where the camera and each participant are
-for the audio thread to read. The listener stays at the origin and sources
-are placed at their offset from it, because OpenAL works in single precision
-and Minecraft coordinates run into the millions. The falloff is linear, at
-full volume within four blocks and reaching silence exactly at the announced
-range, which is just inside where the relay stops forwarding. A speaker the
-game has no position for, or a world without proximity, plays as plain mono.
+once a frame the session records where your head and each participant are,
+and which way the camera faces, for the audio thread to read. You hear from
+your player's head, not the camera, because that is what the host measures
+from; in third person the camera sits several blocks behind you, and
+listening from there would let a voice cut off while it should still be
+audible. The listener stays at the origin and sources are placed at their
+offset from it, because OpenAL works in single precision and Minecraft
+coordinates run into the millions. The falloff is linear, at full volume
+within four blocks and reaching silence exactly at the announced range, which
+is just inside where the relay stops forwarding. Sources are only moved when
+a new frame's positions arrive, not on every tick of the audio thread.
+
+Nothing plays until the host has announced its range and, if proximity is on,
+until the first frame has placed everyone: a voice played flat on a world
+with proximity would put a distant speaker at full volume in your ear. On a
+world without proximity every voice plays as plain mono, as before.
 
 Control traffic, which does need to arrive in order, uses one bidirectional
 stream per connection: the host's settings (currently just the range) and the

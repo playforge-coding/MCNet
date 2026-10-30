@@ -62,6 +62,7 @@ class VoiceProtocolTest {
         assertEquals(0f, Control.decodeSettings(Control.encodeSettings(0f)))
         assertNull(Control.decodeSettings(Control.encodeSettings(-1f)))
         assertNull(Control.decodeSettings(Control.encodeSettings(Float.NaN)))
+        assertNull(Control.decodeSettings(Control.encodeSettings(Float.POSITIVE_INFINITY)))
         assertNull(Control.decodeSettings(byteArrayOf(1, 2)))
     }
 

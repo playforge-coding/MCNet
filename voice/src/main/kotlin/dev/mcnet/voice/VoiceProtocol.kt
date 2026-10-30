@@ -295,7 +295,7 @@ object Control {
     fun decodeSettings(body: ByteArray): Float? {
         if (body.size != 4) return null
         val range = ByteBuffer.wrap(body).getFloat()
-        return if (range.isNaN() || range < 0f) null else range
+        return if (!range.isFinite() || range < 0f) null else range
     }
 
     fun encodeCamera(on: Boolean): ByteArray = byteArrayOf(if (on) 1 else 0)
