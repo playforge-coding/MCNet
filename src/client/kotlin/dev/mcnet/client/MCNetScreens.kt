@@ -3,12 +3,14 @@ package dev.mcnet.client
 import dev.mcnet.client.gui.HostScreen
 import dev.mcnet.client.gui.PeerListScreen
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
+import net.fabricmc.fabric.api.client.screen.v1.Screens
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.PauseScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen
 import net.minecraft.network.chat.Component
+import java.util.WeakHashMap
 
 /**
  * Adds MCNet's two entry points to vanilla screens.
@@ -21,6 +23,9 @@ object MCNetScreens {
     private const val BUTTON_WIDTH = 90
     private const val BUTTON_HEIGHT = 20
     private const val MARGIN = 6
+
+    /** The button we put on each live screen, so re-inits reuse it. */
+    private val added = WeakHashMap<Screen, Button>()
 
     fun register() {
         ScreenEvents.AFTER_INIT.register { minecraft, screen, width, _ ->
@@ -75,8 +80,19 @@ object MCNetScreens {
     ) {
         // Screen#addRenderableWidget is protected; the screen API exposes the
         // same list so widgets added here take part in rendering and input.
-        net.fabricmc.fabric.api.client.screen.v1.Screens
-            .getWidgets(screen)
-            .add(button)
+        val widgets = Screens.getWidgets(screen)
+
+        // AFTER_INIT also fires on resize and when returning to an open
+        // screen. Those paths only call repositionElements, which keeps the
+        // existing widgets, so move our earlier button instead of adding a
+        // second one. A full rebuild clears the list and we add a fresh one.
+        val existing = added[screen]
+        if (existing != null && existing in widgets) {
+            existing.setPosition(button.x, button.y)
+            return
+        }
+
+        widgets.add(button)
+        added[screen] = button
     }
 }
