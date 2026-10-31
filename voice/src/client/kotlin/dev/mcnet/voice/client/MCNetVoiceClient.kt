@@ -9,6 +9,7 @@ import dev.mcnet.voice.VoiceLog
 import dev.mcnet.voice.VoicePayloads
 import dev.mcnet.voice.VoiceServer
 import dev.mcnet.voice.client.gui.VoiceSettingsScreen
+import dev.mcnet.voice.client.video.HeadCameras
 import dev.mcnet.voice.client.video.VideoNative
 import kotlinx.coroutines.launch
 import net.fabricmc.api.ClientModInitializer
@@ -17,6 +18,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelExtractionEvents
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents
 import net.fabricmc.fabric.api.client.screen.v1.Screens
 import net.minecraft.client.KeyMapping
@@ -78,9 +80,19 @@ object MCNetVoiceClient : ClientModInitializer {
         }
         ClientLifecycleEvents.CLIENT_STOPPING.register { endSession() }
         ClientTickEvents.END_CLIENT_TICK.register { tick() }
+        // Once a frame, with the camera already settled for it: where voices
+        // should come from this frame.
+        LevelExtractionEvents.END_EXTRACTION.register { context ->
+            session?.updateSpatial(
+                context.camera(),
+                context.level(),
+                context.deltaTracker().getGameTimeDeltaPartialTick(true),
+            )
+        }
 
         VoiceHud.register()
         VideoHud.register()
+        HeadCameras.register()
 
         ScreenEvents.AFTER_INIT.register { _, screen, _, _ ->
             if (screen is PauseScreen && screen.showsPauseMenu()) addSettingsButton(screen)

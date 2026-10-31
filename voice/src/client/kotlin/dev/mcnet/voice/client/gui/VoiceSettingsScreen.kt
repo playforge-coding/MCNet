@@ -185,15 +185,25 @@ class VoiceSettingsScreen(
         showCameras.width = HALF_WIDTH
         row(quality, showCameras)
 
+        val placement =
+            CycleButton
+                .builder<VoiceClientConfig.CameraPlacement>({ placementLabel(it) }, VoiceClientConfig.cameraPlacement)
+                .withValues(VoiceClientConfig.CameraPlacement.entries)
+                .create(Component.translatable("mcnet-voice.settings.camera_placement")) { _, value ->
+                    VoiceClientConfig.cameraPlacement = value
+                    MCNetVoiceClient.session?.refreshWatches()
+                }
+        placement.width = HALF_WIDTH
+
         val tileWidth =
             ValueSlider(
-                FULL_WIDTH,
+                HALF_WIDTH,
                 VoiceClientConfig.MIN_TILE_WIDTH.toDouble(),
                 VoiceClientConfig.MAX_TILE_WIDTH.toDouble(),
                 VoiceClientConfig.cameraTileWidth.toDouble(),
                 { Component.translatable("mcnet-voice.settings.camera_size", it.roundToInt()) },
             ) { VoiceClientConfig.cameraTileWidth = it.roundToInt() }
-        contents.addChild(tileWidth)
+        row(placement, tileWidth)
 
         status = contents.addChild(MultiLineTextWidget(Component.empty(), font).setMaxWidth(FULL_WIDTH))
 
@@ -257,6 +267,9 @@ class VoiceSettingsScreen(
     private fun qualityLabel(quality: VoiceClientConfig.CameraQuality): Component =
         Component.translatable("mcnet-voice.settings.camera_quality.value", quality.height, quality.kbps)
 
+    private fun placementLabel(placement: VoiceClientConfig.CameraPlacement): Component =
+        Component.translatable("mcnet-voice.settings.camera_placement.${placement.name.lowercase()}")
+
     override fun repositionElements() {
         layout.arrangeElements()
     }
@@ -298,12 +311,14 @@ class VoiceSettingsScreen(
                             session.others.size,
                             camera.description,
                             camera.kbps,
-                        ).withStyle(ChatFormatting.GREEN)
+                        ).append(rangeNote(session))
+                        .withStyle(ChatFormatting.GREEN)
                 }
 
                 session.state == VoiceSession.State.LIVE -> {
                     Component
                         .translatable("mcnet-voice.settings.status.live", session.others.size)
+                        .append(rangeNote(session))
                         .withStyle(ChatFormatting.GREEN)
                 }
 
@@ -317,6 +332,19 @@ class VoiceSettingsScreen(
                         .withStyle(ChatFormatting.RED)
                 }
             }
+    }
+
+    /**
+     * How far voices carry on this host, which the host decides, not this
+     * screen. Says nothing until the host has said, rather than guessing.
+     */
+    private fun rangeNote(session: VoiceSession): Component {
+        val range = session.range ?: return Component.empty()
+        return if (range > 0f) {
+            Component.translatable("mcnet-voice.settings.status.range", range.roundToInt())
+        } else {
+            Component.translatable("mcnet-voice.settings.status.no_range")
+        }
     }
 
     private fun onDevicesChanged() {

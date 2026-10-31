@@ -113,8 +113,12 @@ punching and relay fallback included. Install it next to `mcnet` on the host
 and on every player who wants to talk or be seen. Players without it keep
 playing; they just cannot hear, be heard, or see anyone's camera.
 
-There is no proximity yet. Everyone in the world hears everyone else, and
-every camera that is on is shown to everyone who has cameras enabled.
+Voice is proximity based: a voice carries 48 blocks by default and fades with
+distance, placed in space where the speaker stands, and nobody in another
+dimension hears it. The host can change the range or turn proximity off, in
+which case everyone in the world hears everyone else. Cameras float above
+the heads of the players they belong to, and by default only the cameras of
+players who come within 32 blocks are fetched at all.
 
 ### Using it
 
@@ -122,6 +126,29 @@ Nothing to configure. When the host is hosting over MCNet and a player joins
 with the addon installed, the server offers voice and the client connects.
 That includes the host's own player on a singleplayer world, and it includes
 players who joined over plain LAN rather than through a join code.
+
+The host has two settings of its own in `config/mcnet-voice-server.json`,
+read by whoever runs the relay, which is the dedicated server or the client
+hosting a singleplayer world:
+
+| Setting | Default | Does |
+|---|---|---|
+| `proximity` | `true` | Whether voices fade with distance at all |
+| `range` | `48` | How far a voice carries, in blocks, from 1 to 512 |
+
+Range is enforced by the host and announced to everyone who joins, so a
+joiner's own config has no say in how far voices carry on someone else's
+world. The settings screen shows the range of the world you are in. The file
+is read each time a world starts, so an edit applies to the next world you
+open without restarting the game. A file that cannot be read, or a range
+that is not a number, falls back to proximity on at 48 blocks, never to
+proximity off.
+
+A range wider than the server's entity tracking distance for players
+(roughly its view distance) is allowed, but a client only knows where the
+players it can see are. A speaker who walks out of tracking keeps sounding
+from where they were last seen until the host stops forwarding them, and a
+speaker the client has never seen at all stays silent.
 
 | Key | Default | Does |
 |---|---|---|
@@ -140,14 +167,27 @@ across sessions. Everything lives in `config/mcnet-voice.json`.
 The camera row of the same screen has the on/off switch, the device, the
 quality (240p at 200 kbps up to 720p at 1500 kbps, with the width following
 the camera's aspect ratio), whether other players' cameras are shown at all,
-and how wide the tiles are. The on/off switch is the one setting that is not
-saved: a camera never comes on by itself when a session starts, and the key
-binding is unbound by default so it cannot come on from a stray keypress
-either.
+where they are shown, and how wide the HUD tiles are. The on/off switch is
+the one setting that is not saved: a camera never comes on by itself when a
+session starts, and the key binding is unbound by default so it cannot come
+on from a stray keypress either.
 
-Cameras appear as tiles along the top-right edge, your own first and mirrored
-the way a mirror would show you, each labeled with the player's name and
-framed in green while that player is speaking. The voice HUD stays in the
+By default a player's camera floats above their head, just over the name
+tag, a block wide and turned to face you the way a name tag is, with a green
+frame while they speak. It is depth tested, so a wall hides it the way it
+hides the player. It appears once a player comes within 32 blocks and stays
+until they are 40 blocks away. Your own camera appears above your own head
+too, but only in third person, and the right way round rather than mirrored,
+because that is how everyone else sees it. *Cameras shown* switches to the
+HUD instead, or both. With the HUD in either setting, every camera that is on
+is fetched, wherever its player is.
+
+On the HUD, cameras are tiles along the top-right edge, your own first and
+mirrored the way a mirror would show you, each labeled with the player's
+name and framed in green while that player is speaking. Your own preview is
+there whatever the placement, since in first person it is the only way to
+see that your camera is working; only *Show cameras* off hides it, along with
+everyone else's. The voice HUD stays in the
 bottom-right corner: the names of whoever is speaking, plus your own state
 when it matters (talking, muted, or disconnected).
 
@@ -159,10 +199,22 @@ macOS instead, so if the game vanishes at that moment, that is why.
 ### How it works
 
 The design is a star. Every client holds one QUIC connection to the host over
-a dedicated `mcnet-voice/2` ALPN, and the host relays each frame to everyone
-else. A mesh would avoid the hop through the host, but the star is what makes
-proximity a small change later: the server knows every player's position, so
-proximity becomes a filter in the relay loop rather than a redesign.
+a dedicated `mcnet-voice/3` ALPN, and the host relays each frame to everyone
+else in earshot. A mesh would avoid the hop through the host, but the star is
+what makes proximity cheap and trustworthy: the server is the one place that
+knows every player's position, so proximity is a filter in the relay loop,
+and no client can hear a voice the host did not forward to it.
+
+Every server tick copies each player's eye position and dimension into a
+snapshot the relay reads from its network threads. A frame is forwarded to a
+participant only if they are in the speaker's dimension and within the range
+plus a margin of ten percent, or two blocks if that is more. The margin is
+there because clients place voices from their own view of where players are,
+which lags the server's by a little, and so that the cut happens where the
+client's own falloff has already reached silence. The snapshot keeps being
+taken while nobody is in the call, so it is never stale when someone joins.
+If either end's position is missing anyway, the frame is not forwarded:
+guessing would mean ignoring the dimension rule.
 
 ![Three players each hold one iroh connection to the VoiceServer relay in the host process, and the host's own player attaches to the relay in-process](docs/voice-topology.drawio.svg)
 
@@ -186,9 +238,30 @@ through the OpenAL that Minecraft already ships, on a separate context bound to
 the voice thread with `ALC_EXT_thread_local_context`, so the game's own sound
 engine never notices. Capture uses OpenAL too.
 
+Each voice is an OpenAL source placed where its speaker stands, so OpenAL
+does the panning and the attenuation. The client needs no positions from the
+voice connection for that: the game already tracks every nearby player, and
+once a frame the session records where your head and each participant are,
+and which way the camera faces, for the audio thread to read. You hear from
+your player's head, not the camera, because that is what the host measures
+from; in third person the camera sits several blocks behind you, and
+listening from there would let a voice cut off while it should still be
+audible. The listener stays at the origin and sources are placed at their
+offset from it, because OpenAL works in single precision and Minecraft
+coordinates run into the millions. The falloff is linear, at full volume
+within four blocks and reaching silence exactly at the announced range, which
+is just inside where the relay stops forwarding. Sources are only moved when
+a new frame's positions arrive, not on every tick of the audio thread.
+
+Nothing plays until the host has announced its range and, if proximity is on,
+until the first frame has placed everyone: a voice played flat on a world
+with proximity would put a distant speaker at full volume in your ear. On a
+world without proximity every voice plays as plain mono, as before.
+
 Control traffic, which does need to arrive in order, uses one bidirectional
-stream per connection: the participant roster from the host, and keepalive
-pings so a silent listener is not dropped for idling.
+stream per connection: the host's settings (currently just the range) and the
+participant roster, and keepalive pings so a silent listener is not dropped
+for idling.
 
 **Identity.** A voice connection is admitted only if the game session has
 vouched for its endpoint id. The server sends an offer containing a ticket and
@@ -235,12 +308,36 @@ off and straight back on can therefore never arrive the wrong way round.
 
 The relay forwards a camera only to participants who sent a `WATCH` for it.
 A client without the native video library never asks, so it costs the host no
-bandwidth; the same goes for a player who turned cameras off or hid one. The
-host also keeps each sender's current group in memory, and when someone starts
-watching mid-group it replays the group from its keyframe, so a new viewer
-sees a picture at once instead of waiting up to three seconds for the next
-keyframe. Groups are three seconds long for the same reason: nothing waits on
-keyframes except recovery from a skipped group.
+bandwidth; the same goes for a player who turned cameras off or hid one, and,
+with cameras shown above heads only, for every player who has not come within
+32 blocks of the viewer. The client decides who is near from the game's own
+entity tracking, once a frame, and lets go of a camera only once its player is
+40 blocks away, so someone pacing around the edge is not fetched and dropped
+over and over. That one decision drives both what is fetched and what is
+drawn, so the two never disagree. Asking the host to watch tells the
+client's own decoder first, because for the host's own player the host
+replays the current group the moment it is asked, and a decoder told second
+would discard it. The host also keeps each sender's current group in memory, and when
+someone starts watching mid-group it replays the group from its keyframe, so a
+new viewer, or a player who just walked into range, sees a picture at once
+instead of waiting up to three seconds for the next keyframe. Groups are three
+seconds long for the same reason: nothing waits on keyframes except recovery
+from a skipped group.
+
+A camera above a head is drawn in two passes a frame, the way the game draws
+everything else in the world: extraction decides what to draw while touching
+the game is allowed, which is who is on camera, visible, within range, and
+where their head is this frame, and submission turns that list into one
+textured quad per player, rotated to face the camera like a name tag and lit
+at full brightness. For that the decoded picture's texture is registered with
+the game's texture manager by name, which is how world geometry refers to a
+texture; the HUD keeps drawing the same texture by its view. Drawn by name, a
+texture brings its own sampler, so the picture's texture carries a linear one
+rather than the nearest-neighbor sampler the game's dynamic textures default
+to, which would shimmer on a picture shrunk to a block. New pictures are
+uploaded during extraction only, never once drawing has begun, because a
+picture that changed size replaces its texture, and the HUD captures its view
+of that texture during extraction but draws it at the very end of the frame.
 
 On the sending side, if the transport cannot take a frame the rest of that
 group is dropped, the bitrate comes down by a quarter, and a new group is

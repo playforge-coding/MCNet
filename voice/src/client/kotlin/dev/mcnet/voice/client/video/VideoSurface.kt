@@ -10,6 +10,7 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.DynamicTexture
 import net.minecraft.resources.Identifier
 import org.lwjgl.system.MemoryUtil
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * One video picture as a GPU texture, fed from a decode thread and drawn on
@@ -20,11 +21,30 @@ import org.lwjgl.system.MemoryUtil
  * the front buffer into the texture's own image before uploading it. The lock
  * is held only for the swap and the copy, never while decoding or uploading,
  * so neither thread waits on the other's slow part.
+ *
+ * The texture is also registered with the texture manager under [id], which
+ * is how world geometry refers to a texture: by name, through a render type.
+ * The HUD draws it by texture view instead; both go through [textureView].
+ * Drawn by name, a texture is sampled with its own sampler, so it carries
+ * [SAMPLER] rather than the nearest-neighbor one a plain [DynamicTexture]
+ * comes with.
+ *
+ * [textureView] may replace the texture, which closes the old one, so it
+ * must only be called while the frame is being extracted, never once
+ * drawing has begun: the HUD captures the view during extraction and draws
+ * it at the very end of the frame, and closing it in between would leave
+ * that draw with nothing to sample.
  */
 class VideoSurface(
     private val name: String,
 ) {
-    val id: Identifier = Identifier.fromNamespaceAndPath(VoiceLog.MOD_ID, "video/$name")
+    /**
+     * The texture's name in the texture manager, valid once [textureView]
+     * has returned a picture and until [close]. The serial keeps a surface
+     * that replaces a closed one from racing it for the same name.
+     */
+    val id: Identifier =
+        Identifier.fromNamespaceAndPath(VoiceLog.MOD_ID, "video/$name/${SERIAL.getAndIncrement()}")
 
     private val lock = Any()
     private var back: NativeImage? = null
@@ -89,14 +109,17 @@ class VideoSurface(
             val picture = front ?: return null
             if (dirty) {
                 var current = texture
-                if (current == null || current.pixels?.width != picture.width ||
-                    current.pixels?.height != picture.height
+                if (current == null || current.pixels.width != picture.width ||
+                    current.pixels.height != picture.height
                 ) {
-                    current?.close()
-                    current = DynamicTexture({ "mcnet-voice $name" }, NativeImage(picture.width, picture.height, false))
+                    val manager = Minecraft.getInstance().textureManager
+                    // Releasing closes the old texture as well.
+                    if (current != null) manager.release(id)
+                    current = Texture(name, NativeImage(picture.width, picture.height, false))
+                    manager.register(id, current)
                     texture = current
                 }
-                val pixels = current.pixels ?: return null
+                val pixels = current.pixels
                 MemoryUtil.memCopy(picture.pointer, pixels.pointer, picture.width.toLong() * picture.height * 4)
                 dirty = false
                 upload = true
@@ -118,14 +141,27 @@ class VideoSurface(
             height = 0
         }
         // GPU resources belong to the render thread.
-        Minecraft.getInstance().execute {
-            texture?.close()
+        val minecraft = Minecraft.getInstance()
+        minecraft.execute {
+            if (texture != null) minecraft.textureManager.release(id)
             texture = null
+        }
+    }
+
+    /** A dynamic texture that samples linearly, for when it is drawn by name. */
+    private class Texture(
+        name: String,
+        image: NativeImage,
+    ) : DynamicTexture({ "mcnet-voice $name" }, image) {
+        init {
+            sampler = SAMPLER
         }
     }
 
     companion object {
         /** Webcam tiles are drawn far smaller than they are decoded; nearest sampling would shimmer. */
         val SAMPLER: GpuSampler by lazy { RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR) }
+
+        private val SERIAL = AtomicInteger()
     }
 }

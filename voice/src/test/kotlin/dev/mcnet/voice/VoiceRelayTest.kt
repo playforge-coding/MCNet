@@ -12,19 +12,22 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * The relay against real iroh endpoints on loopback: the roster handshake,
- * fan-out with the speaker id stamped in, admission control, and the
- * in-process path the host's own player uses.
+ * fan-out with the speaker id stamped in, proximity, admission control, and
+ * the in-process path the host's own player uses.
  */
 class VoiceRelayTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -106,6 +109,102 @@ class VoiceRelayTest {
             }
         }
 
+    /** The next SETTINGS message, skipping anything else. */
+    private suspend fun settingsOf(recv: RecvStream): Float {
+        while (true) {
+            val message = assertNotNull(Control.read(recv), "control stream ended early")
+            if (message.type == Control.SETTINGS) return assertNotNull(Control.decodeSettings(message.body))
+        }
+    }
+
+    @Test
+    fun `voices carry only to players in range and in the same dimension`() =
+        runBlocking {
+            val positions = ConcurrentHashMap<UUID, VoiceServer.Position>()
+            val server = VoiceServer(scope) { positions[it] }
+            server.range = 48.0
+            val hostEndpoint = host(server)
+            val alice = bind()
+            val bob = bind()
+            val carol = bind()
+            val aliceUuid = UUID.randomUUID()
+            val bobUuid = UUID.randomUUID()
+            val carolUuid = UUID.randomUUID()
+            server.bind(alice.id().toString(), VoiceServer.Player(aliceUuid, "alice"))
+            server.bind(bob.id().toString(), VoiceServer.Player(bobUuid, "bob"))
+            server.bind(carol.id().toString(), VoiceServer.Player(carolUuid, "carol"))
+            positions[aliceUuid] = VoiceServer.Position("overworld", 0.0, 64.0, 0.0)
+            positions[bobUuid] = VoiceServer.Position("overworld", 10.0, 64.0, 0.0)
+            positions[carolUuid] = VoiceServer.Position("overworld", 100.0, 64.0, 0.0)
+
+            withTimeout(60_000) {
+                val (aliceConn, aliceControl) = dial(alice, hostEndpoint)
+                assertEquals(48f, settingsOf(aliceControl), "the range is announced before the first roster")
+                rosterOf(aliceControl, 1)
+                val (bobConn, bobControl) = dial(bob, hostEndpoint)
+                rosterOf(bobControl, 2)
+                val (carolConn, carolControl) = dial(carol, hostEndpoint)
+                rosterOf(carolControl, 3)
+                rosterOf(aliceControl, 3)
+                rosterOf(bobControl, 3)
+
+                suspend fun aliceSays(sequence: Int) =
+                    aliceConn.sendDatagram(VoiceFrames.encode(VoiceFrames.TYPE_AUDIO, 0, sequence, byteArrayOf(1)))
+
+                suspend fun heardBy(connection: Connection) =
+                    assertNotNull(VoiceFrames.decode(connection.readDatagram())).sequence
+
+                suspend fun silentFor(connection: Connection) = withTimeoutOrNull(500) { connection.readDatagram() }
+
+                aliceSays(1)
+                assertEquals(1, heardBy(bobConn), "bob is 10 blocks away")
+                assertNull(silentFor(carolConn), "carol is 100 blocks away")
+
+                // Close by, but in another dimension.
+                positions[carolUuid] = VoiceServer.Position("the_nether", 5.0, 64.0, 0.0)
+                aliceSays(2)
+                assertEquals(2, heardBy(bobConn))
+                assertNull(silentFor(carolConn), "carol is in the nether")
+
+                positions[carolUuid] = VoiceServer.Position("overworld", 40.0, 64.0, 0.0)
+                aliceSays(3)
+                assertEquals(3, heardBy(bobConn))
+                assertEquals(3, heardBy(carolConn), "carol walked into range")
+
+                // The margin: past the range, but inside 48 + 4.8 blocks.
+                positions[carolUuid] = VoiceServer.Position("overworld", 50.0, 64.0, 0.0)
+                aliceSays(4)
+                assertEquals(4, heardBy(bobConn))
+                assertEquals(4, heardBy(carolConn), "carol is in the margin past the range")
+
+                positions[carolUuid] = VoiceServer.Position("overworld", 53.0, 64.0, 0.0)
+                aliceSays(5)
+                assertEquals(5, heardBy(bobConn))
+                assertNull(silentFor(carolConn), "carol is past the margin")
+
+                // Nobody is guessed at: an unknown listener hears nothing, and
+                // an unknown speaker is heard by no one.
+                positions.remove(bobUuid)
+                positions[carolUuid] = VoiceServer.Position("overworld", 5.0, 64.0, 0.0)
+                aliceSays(6)
+                assertEquals(6, heardBy(carolConn))
+                assertNull(silentFor(bobConn), "bob's position is unknown")
+
+                positions[bobUuid] = VoiceServer.Position("overworld", 10.0, 64.0, 0.0)
+                positions.remove(aliceUuid)
+                aliceSays(7)
+                assertNull(silentFor(bobConn), "alice's position is unknown")
+                assertNull(silentFor(carolConn), "alice's position is unknown")
+
+                // Turning proximity off reaches everyone, and says so.
+                server.range = 0.0
+                assertEquals(0f, settingsOf(carolControl))
+                positions[carolUuid] = VoiceServer.Position("the_end", 1000.0, 64.0, 0.0)
+                aliceSays(8)
+                assertEquals(8, heardBy(carolConn))
+            }
+        }
+
     @Test
     fun `an endpoint nobody vouched for is turned away`() =
         runBlocking {
@@ -132,6 +231,8 @@ class VoiceRelayTest {
 
             val heard = CopyOnWriteArrayList<ByteArray>()
             val rosters = CopyOnWriteArrayList<List<RosterEntry>>()
+            val ranges = CopyOnWriteArrayList<Float>()
+            server.range = 48.0
             val local =
                 server.attachLocal(
                     VoiceServer.Player(UUID.randomUUID(), "host"),
@@ -146,6 +247,10 @@ class VoiceRelayTest {
                             event: VideoEvent,
                         ) {}
 
+                        override fun settings(range: Float) {
+                            ranges += range
+                        }
+
                         override fun roster(entries: List<RosterEntry>) {
                             rosters += entries
                         }
@@ -153,6 +258,10 @@ class VoiceRelayTest {
                         override fun closed(reason: String) {}
                     },
                 )
+            assertEquals(listOf(48f), ranges, "the local participant is told the range on joining")
+            // No positions in this test, so proximity would let nothing through.
+            server.range = 0.0
+            assertEquals(listOf(48f, 0f), ranges, "and again when it changes")
 
             withTimeout(60_000) {
                 val (aliceConn, aliceControl) = dial(alice, hostEndpoint)
