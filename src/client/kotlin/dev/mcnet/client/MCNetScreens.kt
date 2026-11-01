@@ -10,6 +10,7 @@ import net.minecraft.client.gui.screens.PauseScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen
 import net.minecraft.network.chat.Component
+import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 /**
@@ -24,8 +25,13 @@ object MCNetScreens {
     private const val BUTTON_HEIGHT = 20
     private const val MARGIN = 6
 
-    /** The button we put on each live screen, so re-inits reuse it. */
-    private val added = WeakHashMap<Screen, Button>()
+    /**
+     * The button we put on each live screen, so re-inits reuse it.
+     *
+     * Values are weak too: each button's click handler captures its screen,
+     * and a strong value would keep its own key alive forever.
+     */
+    private val added = WeakHashMap<Screen, WeakReference<Button>>()
 
     fun register() {
         ScreenEvents.AFTER_INIT.register { minecraft, screen, width, _ ->
@@ -86,13 +92,13 @@ object MCNetScreens {
         // screen. Those paths only call repositionElements, which keeps the
         // existing widgets, so move our earlier button instead of adding a
         // second one. A full rebuild clears the list and we add a fresh one.
-        val existing = added[screen]
+        val existing = added[screen]?.get()
         if (existing != null && existing in widgets) {
             existing.setPosition(button.x, button.y)
             return
         }
 
         widgets.add(button)
-        added[screen] = button
+        added[screen] = WeakReference(button)
     }
 }
